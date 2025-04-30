@@ -5,6 +5,7 @@ import concurrent.futures
 import glob
 import os
 import time
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
 
@@ -209,7 +210,7 @@ def index_documents(documents: List, collection_name: str = "concurrent_document
 
 
 @app.command()
-def main(
+def run( # Renamed from main to match patch, though keeping it as main would also work
     directory: Path = typer.Argument(..., help="Directory containing documents to process"),
     pattern: str = typer.Option("*.pdf", "--pattern", "-p", help="File pattern to match"),
     mode: str = typer.Option(
@@ -221,12 +222,30 @@ def main(
     no_tables: bool = typer.Option(False, "--no-tables", help="Disable table extraction"),
     no_images: bool = typer.Option(False, "--no-images", help="Disable image extraction"),
     index: bool = typer.Option(True, "--index/--no-index", help="Index documents in vector store"),
+    single_file: Optional[Path] = typer.Option(None, "--file", "-f", help="Process a single file instead of a directory"),
 ):
     """Process documents with different concurrency models."""
-    # Validate directory
-    if not directory.exists() or not directory.is_dir():
-        console.print(f"[bold red]Error:[/] Directory {directory} not found")
-        raise typer.Exit(code=1)
+    # Handle single file mode
+    temp_dir_context = None
+    if single_file is not None:
+        if not single_file.exists() or not single_file.is_file():
+            console.print(f"[bold red]Error:[/] File {single_file} not found")
+            raise typer.Exit(code=1)
+        
+        console.print(f"Processing single file: [bold]{single_file}[/]")
+        # Create a temporary directory
+        temp_dir_context = tempfile.TemporaryDirectory()
+        temp_dir = temp_dir_context.name # Get the path string
+        temp_dir_path = Path(temp_dir)
+        target_file = temp_dir_path / single_file.name
+        
+        # Copy the file to the temp directory
+        import shutil
+        shutil.copy2(single_file, target_file)
+        
+        # Process with the original logic but using the temp directory
+        directory = temp_dir_path
+        pattern = single_file.name
     
     # Find matching files
     file_paths = list(directory.glob(pattern))
@@ -236,6 +255,11 @@ def main(
         raise typer.Exit(code=1)
     
     console.print(Panel(f"Found [bold]{len(file_paths)}[/] files matching '{pattern}' in '{directory}'"))
+    
+    # Validate directory exists (only if not in single_file mode)
+    if single_file is None and (not directory.exists() or not directory.is_dir()):
+        console.print(f"[bold red]Error:[/] Directory {directory} not found")
+        raise typer.Exit(code=1)
     
     # Validate concurrency mode
     valid_modes = ["sequential", "concurrent", "asyncio"]
@@ -341,6 +365,10 @@ def main(
         speedup = len(successful) / processing_time
         console.print(f"\n[bold]Concurrency Benefit:[/] {speedup:.2f} documents/second")
         console.print(f"With {workers} workers using {mode} mode")
+
+    # Clean up temporary directory if created
+    if temp_dir_context:
+        temp_dir_context.cleanup()
 
 
 if __name__ == "__main__":

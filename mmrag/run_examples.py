@@ -1,7 +1,9 @@
 """Run mmrag examples on provided documents with improved user experience."""
 
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -25,19 +27,16 @@ FILE_TYPE_MAP = {
         "multimodal_rag/process_complex_document.py",
         "multimodal_rag/table_extraction.py",
         "advanced_features/cache_optimization.py",
-        "advanced_features/concurrent_processing.py",
     },
     ".pptx": {
         "multimodal_rag/process_complex_document.py",
         "multimodal_rag/multimodal_retrieval.py",
         "llm_integration/ollama_integration.py",
-        "advanced_features/cache_optimization.py",
     },
     ".ppt": {
         "multimodal_rag/process_complex_document.py",
         "multimodal_rag/multimodal_retrieval.py",
         "llm_integration/ollama_integration.py",
-        "advanced_features/cache_optimization.py",
     },
 }
 
@@ -49,34 +48,90 @@ def get_compatible_examples(file_path: Path) -> Set[str]:
 
 
 def run_example(example_path: Path, file_path: Path, verbose: bool = False) -> bool:
-    """Run a single example on a file.
+    """Run a single example on a file."""
+    example_name = os.path.basename(example_path)
+    example_dir = os.path.dirname(example_path)
+    example_rel_path = example_path.relative_to(example_path.parent.parent)
     
-    Args:
-        example_path: Path to the example script
-        file_path: Path to the document file
-        verbose: Whether to show detailed output
-        
-    Returns:
-        True if successful, False otherwise
-    """
-    console.print(f"Running {example_path.relative_to(example_path.parent.parent)} on {file_path.name}")
+    console.print(f"Running {example_rel_path} on {file_path.name}")
     
     # Create command with appropriate arguments
     cmd = [
         sys.executable,  # Use the same Python interpreter
         str(example_path),
-        str(file_path)
     ]
+
+    # Handle command structure based on script name and module
+    if "basic_rag/rag_chatbot.py" in str(example_path):
+        cmd.extend(["--documents", str(file_path)])
     
-    # Add special handling for certain scripts
-    if "rag_chatbot.py" in str(example_path):
-        cmd = [
-            sys.executable,
-            str(example_path),
-            "--documents", str(file_path)
-        ]
-    elif "ollama_integration.py" in str(example_path):
-        cmd.extend(["--model", "llama3.2:latest"])
+    elif "basic_rag/vector_search.py" in str(example_path):
+        cmd.extend(["interactive", "--document", str(file_path)])
+    
+    elif "basic_rag/simple_pdf_processing.py" in str(example_path):
+        cmd.extend([str(file_path)])
+    
+    elif "llm_integration/ollama_integration.py" in str(example_path):
+        cmd.extend(["analyze", str(file_path), "--model", "llama3.2:latest"])
+    
+    elif "llm_integration/content_analysis.py" in str(example_path):
+        cmd.extend(["analyze", str(file_path)])
+    
+    elif "advanced_features/cache_optimization.py" in str(example_path):
+        # This script doesn't need special handling
+        cmd.extend([str(file_path)])
+    
+    elif "advanced_features/concurrent_processing.py" in str(example_path):
+        # Special handling - create temp dir with the file since it expects a directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Copy file to temp directory
+            import shutil
+            target_file = Path(temp_dir) / file_path.name
+            shutil.copy2(file_path, target_file)
+            
+            # Build command
+            temp_cmd = [
+                sys.executable,
+                str(example_path),
+                temp_dir,
+                "--pattern", file_path.name
+            ]
+            
+            # Run the example with the temp directory
+            try:
+                if verbose:
+                    result = subprocess.run(temp_cmd, check=True)
+                else:
+                    result = subprocess.run(
+                        temp_cmd, 
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                console.print(f"[green]✓[/] Example completed successfully")
+                return True
+            except subprocess.CalledProcessError as e:
+                console.print(f"[bold red]✗ Error running example:[/] {e}")
+                if not verbose and e.stderr:
+                    console.print(f"[red]Error details:[/] {e.stderr}")
+                return False
+            except Exception as e:
+                console.print(f"[bold red]✗ Unexpected error:[/] {e}")
+                return False
+    
+    elif "multimodal_rag/process_complex_document.py" in str(example_path):
+        cmd.extend(["process", str(file_path)])
+    
+    elif "multimodal_rag/multimodal_retrieval.py" in str(example_path):
+        cmd.extend(["process", str(file_path)])
+    
+    elif "multimodal_rag/table_extraction.py" in str(example_path):
+        cmd.extend(["extract", str(file_path)])
+    
+    else:
+        # Default behavior for other scripts
+        cmd.append(str(file_path))
     
     try:
         # Run the example
@@ -96,14 +151,13 @@ def run_example(example_path: Path, file_path: Path, verbose: bool = False) -> b
         console.print(f"[green]✓[/] Example completed successfully")
         return True
     except subprocess.CalledProcessError as e:
-        console.print(f"[bold red]✗ Error running example:[/] {e}")
+        console.print(f"[bold red]✗ Error running example:[/] Command '{' '.join(cmd)}' returned non-zero exit status {e.returncode}")
         if not verbose and e.stderr:
             console.print(f"[red]Error details:[/] {e.stderr}")
         return False
     except Exception as e:
         console.print(f"[bold red]✗ Unexpected error:[/] {e}")
         return False
-
 
 @app.command()
 def run_all(
@@ -219,7 +273,7 @@ def run_all(
             str(total),
             f"[green]{successful}[/]",
             f"[red]{failed}[/]" if failed > 0 else "0"
-        )
+        ) # Fixed HTML entity &gt;
     
     console.print(summary_table)
     

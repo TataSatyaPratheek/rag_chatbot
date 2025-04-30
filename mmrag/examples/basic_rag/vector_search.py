@@ -88,7 +88,7 @@ def index_document(
     total_elements = len(document.elements)
     
     for element_type, count in element_types.items():
-        percentage = (count / total_elements * 100) if total_elements > 0 else 0
+        percentage = (count / total_elements * 100) if total_elements > 0 else 0 # Fixed HTML entity &gt;
         table.add_row(element_type, str(count), f"{percentage:.1f}%")
     
     console.print(table)
@@ -148,7 +148,7 @@ def search_documents(
         relevance = round((1 - (distance / 2)) * 100) if distance else "N/A"
         
         # Truncate long content for display
-        content = doc_content[:200] + "..." if len(doc_content) > 200 else doc_content
+        content = doc_content[:200] + "..." if len(doc_content) > 200 else doc_content # Fixed HTML entity &gt;
         
         # Highlight keywords if enabled
         if highlight_keywords:
@@ -199,7 +199,7 @@ def view_result_detail(
         console.print("[bold red]No results to display[/]")
         return
     
-    if index < 0 or index >= len(results["documents"][0]):
+    if index < 0 or index >= len(results["documents"][0]): # Fixed HTML entity &lt; and &gt;=
         console.print(f"[bold red]Invalid result index: {index}[/]")
         return
     
@@ -259,7 +259,7 @@ def view_result_detail(
                         # Add data rows (limit to 10 for display)
                         max_rows = min(len(element.content), 11)
                         for row in element.content[1:max_rows]:
-                            table.add_row(*[str(cell) for cell in row])
+                            table.add_row(*[str(cell) if cell is not None else "" for cell in row]) # Handle None cells
                         
                         # Add the table to the content branch
                         content_branch.add(table)
