@@ -9,9 +9,9 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 
 import typer
 from mmrag.document_processing.legacy import PDFProcessor
-from mmrag.document_processing.advanced_table import CascadeTabNetDetector
+from mmrag.document_processing.legacy.advanced_table import CascadeTabNetDetector
 from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
-from mmrag.document_processing.table import TableDetector
+from mmrag.document_processing.legacy.table import TableDetector
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
