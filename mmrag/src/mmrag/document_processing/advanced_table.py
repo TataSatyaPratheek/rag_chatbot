@@ -46,23 +46,36 @@ class CascadeTabNetDetector:
             '__background__', 'table', 'table_bordered', 'table_borderless', 'table_rotated'
         ]
 
-        self.model = self._load_model(model_path)
-        self.model.to(self.device)
-        self.model.eval()
+        try:
+            # First try to load model with device specified directly
+            self.model = self._load_model(model_path, device=self.device)
+            self.model.eval()
+        except Exception as e:
+            logger.warning(f"Error loading model with device specified: {e}")
+            # Fall back to CPU if needed
+            self.device = torch.device('cpu')
+            self.model = self._load_model(model_path, device=self.device)
+            self.model.eval()
     
-    def _load_model(self, model_path: Optional[str]) -> nn.Module:
+    def _load_model(self, model_path: Optional[str], device=None) -> nn.Module:
         """Load the model architecture and weights.
         
         Args:
             model_path: Path to pre-trained model weights.
+            device: Device to load the model on.
             
         Returns:
             Loaded model.
         """
         # For demo purposes, we use MaskRCNN as a base
         # In production, you would implement the full CascadeTabNet architecture
-        # Use weights parameter instead of pretrained
-        model = maskrcnn_resnet50_fpn(weights=MaskRCNN_ResNet50_FPN_Weights.DEFAULT)
+        
+        # Create model on the specified device
+        if device:
+            with torch.device(device):
+                model = maskrcnn_resnet50_fpn(weights=MaskRCNN_ResNet50_FPN_Weights.DEFAULT)
+        else:
+            model = maskrcnn_resnet50_fpn(weights=MaskRCNN_ResNet50_FPN_Weights.DEFAULT)
         
         # Modify the classifier for our classes
         in_features = model.roi_heads.box_predictor.cls_score.in_features
@@ -76,11 +89,24 @@ class CascadeTabNetDetector:
         # Load weights if provided
         if model_path and os.path.exists(model_path):
             try:
-                state_dict = torch.load(model_path, map_location=self.device)
-                model.load_state_dict(state_dict)
+                if device:
+                    state_dict = torch.load(model_path, map_location=device)
+                else:
+                    state_dict = torch.load(model_path, map_location=self.device)
+                
+                # Filter state dict to only include keys that match the model
+                filtered_state_dict = {k: v for k, v in state_dict.items() if k in model.state_dict()}
+                if not filtered_state_dict:
+                    logger.warning(f"No matching keys found in state dict from {model_path}")
+                
+                model.load_state_dict(filtered_state_dict, strict=False)
                 logger.info(f"Loaded model weights from {model_path}")
             except Exception as e:
                 logger.warning(f"Failed to load model weights: {e}")
+        
+        # Move model to device
+        if device:
+            model = model.to(device)
         
         return model
     
@@ -118,9 +144,10 @@ class CascadeTabNetDetector:
             keep = prediction['scores'] > 0.7
             boxes = prediction['boxes'][keep].cpu().numpy()
             labels = prediction['labels'][keep].cpu().numpy()
+            scores = prediction['scores'][keep].cpu().numpy()
             
             # Convert to table elements
-            for i, (box, label) in enumerate(zip(boxes, labels)):
+            for i, (box, label, score) in enumerate(zip(boxes, labels, scores)):
                 if label > 0:  # Not background
                     class_name = self.classes[label]
                     
@@ -150,7 +177,7 @@ class CascadeTabNetDetector:
                         ),
                         metadata={
                             "table_type": class_name,
-                            "confidence": float(prediction['scores'][i]),
+                            "confidence": float(score),
                         },
                     )
                     table_elements.append(table_element)

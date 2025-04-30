@@ -81,17 +81,34 @@ class ChromaStore:
         
         return embedding
 
-        
-        
-    
     def _get_embedding_model(self):
         """Lazy-load the embedding model."""
         if self.embedding_model is None:
             logger.info(f"Loading embedding model: {self.embedding_model_name}")
             # Explicitly set device to handle potential MPS/meta tensor issues
             device = "mps" if torch.backends.mps.is_available() else "cpu"
-            self.embedding_model = SentenceTransformer(self.embedding_model_name)
-            self.embedding_model.to(device) # Move model to device after loading
+            
+            try:
+                # Try direct initialization with device parameter
+                self.embedding_model = SentenceTransformer(self.embedding_model_name, device=device)
+            except (TypeError, ValueError):
+                # If that fails, try initializing and then moving to device
+                try:
+                    self.embedding_model = SentenceTransformer(self.embedding_model_name)
+                    
+                    # Use to_empty() if available (newer PyTorch versions)
+                    if hasattr(self.embedding_model, 'to_empty'):
+                        self.embedding_model.to_empty(device=device)
+                    else:
+                        self.embedding_model.to(device)
+                except NotImplementedError as e:
+                    if "Cannot copy out of meta tensor; no data!" in str(e):
+                        # Handle meta tensors - use CPU as fallback
+                        logger.warning("Meta tensor detected, falling back to CPU.")
+                        self.embedding_model = SentenceTransformer(self.embedding_model_name, device="cpu")
+                    else:
+                        raise
+        
         return self.embedding_model
     
     def add_document(self, document: ProcessedDocument) -> None:
@@ -137,6 +154,11 @@ class ChromaStore:
         model = self._get_embedding_model()
         embeddings = model.encode(texts)
         
+        # Ensure embeddings have the correct shape (n_elements, embedding_dim)
+        if len(embeddings.shape) == 1 and len(texts) == 1:
+            # If we only have one text and a 1D embedding, reshape it to 2D
+            embeddings = embeddings.reshape(1, -1)
+        
         # Add to the collection
         self.collection.add(
             embeddings=embeddings.tolist(),
@@ -169,9 +191,13 @@ class ChromaStore:
         model = self._get_embedding_model()
         query_embedding = model.encode(query_text)
         
+        # Ensure embedding has the correct shape
+        if len(query_embedding.shape) == 1:
+            query_embedding = query_embedding.reshape(1, -1)
+        
         # Query the collection
         results = self.collection.query(
-            query_embeddings=[query_embedding.tolist()],
+            query_embeddings=query_embedding.tolist(),
             n_results=n_results,
             where=where,
             where_document=where_document,
@@ -219,7 +245,7 @@ class ChromaStore:
         elif element.element_type == "chart":
             # For charts, use the description and any extracted data
             text = f"Chart: {element.content}"
-            if element.data:
+            if hasattr(element, 'data') and element.data:
                 if isinstance(element.data, dict):
                     data_str = ", ".join(f"{k}: {v}" for k, v in element.data.items())
                     text += f" Data: {data_str}"

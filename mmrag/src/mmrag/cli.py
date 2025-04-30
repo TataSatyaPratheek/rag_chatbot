@@ -5,7 +5,6 @@ import logging
 import sys
 from pathlib import Path
 import subprocess
-import sys
 from typing import List, Optional
 
 import typer
@@ -13,7 +12,8 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from mmrag.document_processing import PDFProcessor, ProcessedDocument
+from mmrag.document_processing.factory import get_processor
+from mmrag.document_processing.base import ProcessedDocument
 from mmrag.vectordb import ChromaStore
 
 # Set up logging
@@ -46,7 +46,6 @@ def process(
 
     # Get appropriate processor
     try:
-        from mmrag.document_processing.factory import get_processor
         processor = get_processor(file_path)
 
         # Configure processor options
@@ -117,55 +116,15 @@ def store(
     llm_analysis: bool = typer.Option(False, help="Enable LLM content analysis"),
 ):
     """Process a document and store it in the vector database."""
-    # --- Replicate processing logic from 'process' command ---
-    # Avoid calling the 'process' command directly to prevent issues with testing/mocking
-    try:
-        processed_doc = _process_document_for_store(file_path, extract_tables, extract_images, advanced_tables, enhanced_visual, llm_analysis)
-    except typer.Exit:
-        raise # Re-raise Exit exceptions from processing
-
-    if not processed_doc:
-        raise typer.Exit(code=1)
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        progress.add_task(description="Storing in vector database...", total=None)
-
-        # Store in vector database
-        store = ChromaStore(collection_name=collection_name)
-
-        try:
-            store.add_document(processed_doc)
-        except Exception as e:
-            progress.stop()
-            console.print(f"[bold red]Error storing document:[/] {e}")
-            raise typer.Exit(code=1)
-
-    console.print("\n[bold green]Document stored successfully![/]")
-    console.print(f"Document ID: {processed_doc.document_id}")
-    console.print(f"Collection: {collection_name}")
-
-
-def _process_document_for_store(
-    file_path: Path,
-    extract_tables: bool,
-    extract_images: bool,
-    advanced_tables: bool,
-    enhanced_visual: bool,
-    llm_analysis: bool,
-) -> Optional[ProcessedDocument]:
-    """Helper function to contain the processing logic used by 'store'."""
+    # Check if the file exists first
     if not file_path.exists():
         console.print(f"[bold red]Error:[/] File not found: {file_path}")
         raise typer.Exit(code=1)
-
+    
+    # Get appropriate processor
     try:
-        from mmrag.document_processing.factory import get_processor
         processor = get_processor(file_path)
-
+        
         # Configure processor options
         if hasattr(processor, 'extract_tables'):
             processor.extract_tables = extract_tables
@@ -181,12 +140,40 @@ def _process_document_for_store(
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)
 
-    try:
-        processed_doc = processor.process(file_path)
-        return processed_doc
-    except Exception as e:
-        console.print(f"[bold red]Error processing document:[/] {e}")
-        raise typer.Exit(code=1) # Raise Exit to be caught by Typer
+    # Process the document
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task(description="Processing document...", total=None)
+        
+        try:
+            processed_doc = processor.process(file_path)
+        except Exception as e:
+            progress.stop()
+            console.print(f"[bold red]Error processing document:[/] {e}")
+            raise typer.Exit(code=1)
+
+    # Store in vector database
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task(description="Storing in vector database...", total=None)
+
+        try:
+            store = ChromaStore(collection_name=collection_name)
+            store.add_document(processed_doc)
+        except Exception as e:
+            progress.stop()
+            console.print(f"[bold red]Error storing document:[/] {e}")
+            raise typer.Exit(code=1)
+
+    console.print("\n[bold green]Document stored successfully![/]")
+    console.print(f"Document ID: {processed_doc.document_id}")
+    console.print(f"Collection: {collection_name}")
 
 
 @app.command()
@@ -205,12 +192,12 @@ def query(
         progress.add_task(description="Querying vector database...", total=None)
 
         # Initialize vector store
-        store = ChromaStore(collection_name=collection_name)
-
-        # Prepare filter
-        where = {"document_id": document_id} if document_id else None
-
         try:
+            store = ChromaStore(collection_name=collection_name)
+        
+            # Prepare filter
+            where = {"document_id": document_id} if document_id else None
+
             results = store.query(
                 query_text=query_text,
                 n_results=n_results,
@@ -252,9 +239,8 @@ def delete(
         progress.add_task(description=f"Deleting document {document_id}...", total=None)
 
         # Initialize vector store
-        store = ChromaStore(collection_name=collection_name)
-
         try:
+            store = ChromaStore(collection_name=collection_name)
             store.delete_document(document_id)
         except Exception as e:
             progress.stop()
