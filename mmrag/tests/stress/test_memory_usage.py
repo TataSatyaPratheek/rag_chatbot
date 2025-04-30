@@ -8,7 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.legacy import PDFProcessor
 from mmrag.vectordb import ChromaStore
 
 @pytest.mark.stress

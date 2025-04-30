@@ -53,6 +53,7 @@ dependencies = [
     "httpx>=0.25.0",
     "tenacity>=8.2.3",
     "dspy-ai>=2.0.0",  # For guardrails
+    "docling>=0.1.0",  # Add Docling dependency
     
     # Utilities
     "python-dotenv>=1.0.0",

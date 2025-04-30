@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
-from mmrag.document_processing import PowerPointProcessor
+from mmrag.document_processing.legacy import PowerPointProcessor
 from mmrag.document_processing.base import ProcessedDocument, TextElement, TableElement
 
 class TestPowerPointProcessor:

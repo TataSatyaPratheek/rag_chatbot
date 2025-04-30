@@ -6,7 +6,7 @@ import typer
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.legacy import PDFProcessor
 # --- Added: Import exceptions and psutil ---
 from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError
 from rich.console import Console

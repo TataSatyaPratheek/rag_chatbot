@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import typer
-from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.legacy import PDFProcessor
 from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from mmrag.document_processing.cache import CachedDocumentProcessor
 from mmrag.vectordb import ChromaStore

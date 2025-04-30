@@ -3,7 +3,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from mmrag.document_processing.factory import get_processor
-from mmrag.document_processing import PDFProcessor, PowerPointProcessor
+from mmrag.document_processing.legacy import PDFProcessor, PowerPointProcessor
 
 class TestProcessorFactory:
     """Test suite for the document processor factory."""

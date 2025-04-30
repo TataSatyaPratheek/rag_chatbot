@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import csv
 
-from mmrag.document_processing import PDFProcessor, PowerPointProcessor
+from mmrag.document_processing.legacy import PDFProcessor, PowerPointProcessor
 from mmrag.vectordb import ChromaStore
 
 @pytest.mark.stress

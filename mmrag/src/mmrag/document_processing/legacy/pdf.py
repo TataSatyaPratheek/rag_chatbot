@@ -20,10 +20,10 @@ from mmrag.document_processing.base import (
     ProcessedDocument,
     TextElement,
 )
-from mmrag.document_processing.table import TableDetector
-from mmrag.document_processing.visual import VisualElementProcessor
-from mmrag.document_processing.advanced_table import CascadeTabNetDetector
-from mmrag.document_processing.enhanced_visual import EnhancedVisualProcessor
+from mmrag.document_processing.legacy.table import TableDetector
+from mmrag.document_processing.legacy.visual import VisualElementProcessor
+from mmrag.document_processing.legacy.advanced_table import CascadeTabNetDetector
+from mmrag.document_processing.legacy.enhanced_visual import EnhancedVisualProcessor
 from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError
 
 
@@ -57,7 +57,7 @@ class PDFProcessor(DocumentProcessor):
         # Use advanced table detection if requested
         if advanced_table_detection:
             try:
-                from mmrag.document_processing.advanced_table import CascadeTabNetDetector
+                from mmrag.document_processing.legacy.advanced_table import CascadeTabNetDetector
                 self.table_detector = CascadeTabNetDetector()
             except (ImportError, Exception) as e:
                 logger.warning(f"Failed to load advanced table detector: {e}")
@@ -68,7 +68,7 @@ class PDFProcessor(DocumentProcessor):
         # Use enhanced visual processor if requested
         if enable_enhanced_visual:
             try:
-                from mmrag.document_processing.enhanced_visual import EnhancedVisualProcessor
+                from mmrag.document_processing.legacy.enhanced_visual import EnhancedVisualProcessor
                 self.visual_processor = EnhancedVisualProcessor()
             except (ImportError, Exception) as e:
                 logger.warning(f"Failed to load enhanced visual processor: {e}")
@@ -93,7 +93,7 @@ class PDFProcessor(DocumentProcessor):
         start_time = time.time()
         process = psutil.Process(os.getpid())
         initial_available_memory = psutil.virtual_memory().available
-        memory_limit_bytes = initial_available_memory * self.memory_limit_fraction
+        memory_limit_bytes = psutil.virtual_memory().available * self.memory_limit_fraction # Calculate based on current available memory
         
         # Generate a document ID based on file content
         document_id = self._generate_document_id(document_path)
@@ -115,7 +115,7 @@ class PDFProcessor(DocumentProcessor):
                 raise ProcessingTimeoutError(f"Processing exceeded {self.timeout_seconds} seconds limit.")
                 
             current_rss = process.memory_info().rss
-            if current_rss > memory_limit_bytes:
+            if current_rss > (initial_available_memory - (psutil.virtual_memory().available - memory_limit_bytes)): # Check against the calculated limit based on available memory
                 raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
             # --- End Resource Checks ---
 

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Union, Any
 
 import httpx
 import typer
-from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.legacy import PDFProcessor
 from mmrag.document_processing.factory import get_processor # Use factory
 from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import processing exceptions
 from mmrag.llm import LLMClientError # Import LLM exception from correct location

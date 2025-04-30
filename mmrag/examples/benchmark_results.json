@@ -1,0 +1,220 @@
+{
+  "legacy_t1_i1_a0_e0": {
+    "time_metrics": {
+      "initialization_time": 0.00011968612670898438,
+      "processing_time": 0.9490571022033691,
+      "time_per_page": 0.01904426820840936,
+      "serialization_time": 0.009266519546508789
+    },
+    "space_metrics": {
+      "peak_memory_delta": 6765932.4,
+      "final_memory_delta": 4114826.4,
+      "memory_usage": 17363763.2,
+      "serialized_size": 911037.0
+    },
+    "document_metrics": {
+      "financial_report.pdf": {
+        "time_metrics": {
+          "initialization_time": 0.00014495849609375,
+          "processing_time": 2.6065759658813477,
+          "time_per_page": 0.016602394687142343,
+          "serialization_time": 0.026694059371948242
+        },
+        "space_metrics": {
+          "peak_memory_delta": 5753654,
+          "final_memory_delta": 5640557,
+          "memory_usage": 48824320,
+          "serialized_size": 3465489
+        },
+        "extraction_metrics": {
+          "element_counts": {
+            "text": 157,
+            "table": 1112,
+            "image": 5
+          }
+        },
+        "error": null,
+        "error_type": null
+      },
+      "research_paper.pdf": {
+        "time_metrics": {
+          "initialization_time": 0.00012969970703125,
+          "processing_time": 0.5844972133636475,
+          "time_per_page": 0.03896648089090983,
+          "serialization_time": 0.0028998851776123047
+        },
+        "space_metrics": {
+          "peak_memory_delta": 766705,
+          "final_memory_delta": 591332,
+          "memory_usage": 26017792,
+          "serialized_size": 309804
+        },
+        "extraction_metrics": {
+          "element_counts": {
+            "text": 15,
+            "table": 132,
+            "image": 2
+          }
+        },
+        "error": null,
+        "error_type": null
+      },
+      "presentation.pptx": {
+        "time_metrics": {
+          "initialization_time": 0.00010395050048828125,
+          "processing_time": 0.27637720108032227,
+          "time_per_page": 0,
+          "serialization_time": 0.004065990447998047
+        },
+        "space_metrics": {
+          "peak_memory_delta": 25061737,
+          "final_memory_delta": 12381307,
+          "memory_usage": 18989056,
+          "serialized_size": 140430
+        },
+        "extraction_metrics": {
+          "element_counts": {
+            "text": 325,
+            "table": 3
+          }
+        },
+        "error": null,
+        "error_type": null
+      },
+      "annual_report.pdf": {
+        "time_metrics": {
+          "initialization_time": 0.00010585784912109375,
+          "processing_time": 1.2519402503967285,
+          "time_per_page": 0.013757585169194819,
+          "serialization_time": 0.012350797653198242
+        },
+        "space_metrics": {
+          "peak_memory_delta": 2145603,
+          "final_memory_delta": 1902115,
+          "memory_usage": -8126464,
+          "serialized_size": 618512
+        },
+        "extraction_metrics": {
+          "element_counts": {
+            "image": 2,
+            "table": 726
+          }
+        },
+        "error": null,
+        "error_type": null
+      },
+      "data_sheet.pdf": {
+        "time_metrics": {
+          "initialization_time": 0.00011396408081054688,
+          "processing_time": 0.025894880294799805,
+          "time_per_page": 0.025894880294799805,
+          "serialization_time": 0.0003218650817871094
+        },
+        "space_metrics": {
+          "peak_memory_delta": 101963,
+          "final_memory_delta": 58821,
+          "memory_usage": 1114112,
+          "serialized_size": 20950
+        },
+        "extraction_metrics": {
+          "element_counts": {
+            "table": 10,
+            "image": 1
+          }
+        },
+        "error": null,
+        "error_type": null
+      }
+    },
+    "retrieval_metrics": {
+      "error": "Document processing failed: Memory usage (647.19 MB) exceeded limit (630.69 MB)."
+    }
+  },
+  "docling_t1_i1_a0_e0": {
+    "time_metrics": {
+      "initialization_time": 7.128715515136719e-05,
+      "processing_time": 0.2577838897705078,
+      "time_per_page": 0.0,
+      "serialization_time": 0.0036618709564208984
+    },
+    "space_metrics": {
+      "peak_memory_delta": 25003273.0,
+      "final_memory_delta": 12254590.0,
+      "memory_usage": 23281664.0,
+      "serialized_size": 140430.0
+    },
+    "document_metrics": {
+      "financial_report.pdf": {
+        "time_metrics": {
+          "initialization_time": 9.012222290039062e-05,
+          "processing_time": 0.00503993034362793
+        },
+        "space_metrics": {},
+        "extraction_metrics": {},
+        "error": "Memory usage (647.22 MB) exceeded limit (624.34 MB).",
+        "error_type": "MemoryLimitExceededError"
+      },
+      "research_paper.pdf": {
+        "time_metrics": {
+          "initialization_time": 7.700920104980469e-05,
+          "processing_time": 0.0031468868255615234
+        },
+        "space_metrics": {},
+        "extraction_metrics": {},
+        "error": "Memory usage (647.22 MB) exceeded limit (624.34 MB).",
+        "error_type": "MemoryLimitExceededError"
+      },
+      "presentation.pptx": {
+        "time_metrics": {
+          "initialization_time": 7.128715515136719e-05,
+          "processing_time": 0.2577838897705078,
+          "time_per_page": 0,
+          "serialization_time": 0.0036618709564208984
+        },
+        "space_metrics": {
+          "peak_memory_delta": 25003273,
+          "final_memory_delta": 12254590,
+          "memory_usage": 23281664,
+          "serialized_size": 140430
+        },
+        "extraction_metrics": {
+          "element_counts": {
+            "text": 325,
+            "table": 3
+          }
+        },
+        "error": null,
+        "error_type": null
+      },
+      "annual_report.pdf": {
+        "time_metrics": {
+          "initialization_time": 0.000102996826171875,
+          "processing_time": 0.003643035888671875
+        },
+        "space_metrics": {},
+        "extraction_metrics": {},
+        "error": "Memory usage (669.92 MB) exceeded limit (624.34 MB).",
+        "error_type": "MemoryLimitExceededError"
+      },
+      "data_sheet.pdf": {
+        "time_metrics": {
+          "initialization_time": 6.699562072753906e-05,
+          "processing_time": 0.000843048095703125
+        },
+        "space_metrics": {},
+        "extraction_metrics": {},
+        "error": "Memory usage (669.94 MB) exceeded limit (624.34 MB).",
+        "error_type": "MemoryLimitExceededError"
+      }
+    },
+    "retrieval_metrics": {
+      "error": "Document processing failed: Memory usage (670.34 MB) exceeded limit (624.34 MB)."
+    },
+    "errors": [
+      "Memory usage (647.22 MB) exceeded limit (624.34 MB).",
+      "Memory usage (647.22 MB) exceeded limit (624.34 MB).",
+      "Memory usage (669.92 MB) exceeded limit (624.34 MB).",
+      "Memory usage (669.94 MB) exceeded limit (624.34 MB)."
+    ]
+  }
+}

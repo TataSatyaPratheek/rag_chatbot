@@ -7,7 +7,7 @@ import json
 
 import dspy # Import dspy
 
-from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.legacy import PDFProcessor
 from mmrag.llm import ContentUnderstanding, OllamaClient
 # Import the DSPy modules we need to mock
 from mmrag.guardrails.processors import (

@@ -41,6 +41,7 @@ def process(
     enhanced_visual: bool = typer.Option(False, help="Use enhanced visual element detection"),
     llm_analysis: bool = typer.Option(False, help="Enable LLM content analysis"),
 ):
+    use_docling: bool = typer.Option(True, help="Use Docling processor if available"),  # New option
     """Process a document and extract its elements."""
     if not file_path.exists():
         console.print(f"[bold red]Error:[/] File not found: {file_path}")
@@ -48,19 +49,16 @@ def process(
 
     # Get appropriate processor - explicitly call get_processor to ensure our mock works
     try:
-        processor = get_processor(file_path)
-
-        # Configure processor options
-        if hasattr(processor, 'extract_tables'):
-            processor.extract_tables = extract_tables
-        if hasattr(processor, 'extract_images'):
-            processor.extract_images = extract_images
-        if advanced_tables and hasattr(processor, 'advanced_table_detection'):
-            processor.advanced_table_detection = True
-        if enhanced_visual and hasattr(processor, 'enable_enhanced_visual'):
-            processor.enable_enhanced_visual = True
-        if llm_analysis and hasattr(processor, 'enable_llm_analysis'):
-            processor.enable_llm_analysis = True
+        processor = get_processor(
+            file_path,
+            use_docling=use_docling, # Pass the new parameter
+            # Pass other options directly to the factory
+            extract_tables=extract_tables,
+            extract_images=extract_images,
+            advanced_table_detection=advanced_tables,
+            enable_enhanced_visual=enhanced_visual,
+            enable_llm_analysis=llm_analysis,
+        )
     except ValueError as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)
@@ -119,6 +117,7 @@ def store(
     advanced_tables: bool = typer.Option(False, help="Use advanced table detection"),
     enhanced_visual: bool = typer.Option(False, help="Use enhanced visual element detection"),
     llm_analysis: bool = typer.Option(False, help="Enable LLM content analysis"),
+    use_docling: bool = typer.Option(True, help="Use Docling processor if available"), # New option
 ):
     """Process a document and store it in the vector database."""
     # Check if the file exists first
@@ -128,19 +127,16 @@ def store(
     
     # Get appropriate processor - ensure mocks work
     try:
-        processor = get_processor(file_path)
-        
-        # Configure processor options
-        if hasattr(processor, 'extract_tables'):
-            processor.extract_tables = extract_tables
-        if hasattr(processor, 'extract_images'):
-            processor.extract_images = extract_images
-        if advanced_tables and hasattr(processor, 'advanced_table_detection'):
-            processor.advanced_table_detection = True
-        if enhanced_visual and hasattr(processor, 'enable_enhanced_visual'):
-            processor.enable_enhanced_visual = True
-        if llm_analysis and hasattr(processor, 'enable_llm_analysis'):
-            processor.enable_llm_analysis = True
+        processor = get_processor(
+            file_path,
+            use_docling=use_docling, # Pass the new parameter
+            # Pass other options directly to the factory
+            extract_tables=extract_tables,
+            extract_images=extract_images,
+            advanced_table_detection=advanced_tables,
+            enable_enhanced_visual=enhanced_visual,
+            enable_llm_analysis=llm_analysis,
+        )
     except ValueError as e:
         console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(code=1)

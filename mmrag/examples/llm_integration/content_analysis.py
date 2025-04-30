@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple
 
 import typer
-from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.legacy import PDFProcessor
 from mmrag.llm import OllamaClient, ContentUnderstanding
 from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from rich.console import Console

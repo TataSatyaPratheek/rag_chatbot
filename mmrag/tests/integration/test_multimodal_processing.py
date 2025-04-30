@@ -3,7 +3,7 @@ import pytest
 import os
 from pathlib import Path
 
-from mmrag.document_processing import PDFProcessor, PowerPointProcessor
+from mmrag.document_processing.legacy import PDFProcessor, PowerPointProcessor
 from mmrag.document_processing.enhanced_visual import EnhancedVisualProcessor
 from mmrag.document_processing.factory import get_processor
 

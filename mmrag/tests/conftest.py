@@ -9,7 +9,7 @@ import numpy as np
 from unittest.mock import MagicMock # Added import
 from PIL import Image
 
-from mmrag.document_processing import (
+from mmrag.document_processing.legacy import (
     PDFProcessor, PowerPointProcessor, TableDetector, 
     EnhancedVisualProcessor
 )

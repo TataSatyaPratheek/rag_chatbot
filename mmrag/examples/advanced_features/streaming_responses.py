@@ -11,7 +11,7 @@ from typing import AsyncGenerator, Dict, List, Optional, Union, Any
 
 import httpx
 import typer
-from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.legacy import PDFProcessor
 from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from mmrag.vectordb import ChromaStore
 from rich.console import Console

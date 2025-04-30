@@ -5,7 +5,7 @@ import time
 import os
 from pathlib import Path
 
-from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.legacy import PDFProcessor
 from mmrag.vectordb import ChromaStore
 
 @pytest.mark.stress

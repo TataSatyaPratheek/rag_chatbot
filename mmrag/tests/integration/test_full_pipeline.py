@@ -2,7 +2,7 @@
 import pytest
 from pathlib import Path
 
-from mmrag.document_processing import PDFProcessor, PowerPointProcessor
+from mmrag.document_processing.legacy import PDFProcessor, PowerPointProcessor
 from mmrag.vectordb import ChromaStore
 from mmrag.document_processing.base import ProcessedDocument
 

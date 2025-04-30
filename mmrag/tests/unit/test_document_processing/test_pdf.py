@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 import fitz
 
-from mmrag.document_processing import PDFProcessor, TextElement, TableElement
+from mmrag.document_processing.legacy import PDFProcessor, TextElement, TableElement
 from mmrag.document_processing.base import ProcessedDocument, BoundingBox
 
 class TestPDFProcessor:
