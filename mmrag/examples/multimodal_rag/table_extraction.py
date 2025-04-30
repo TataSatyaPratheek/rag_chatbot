@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 import typer
 from mmrag.document_processing import PDFProcessor
 from mmrag.document_processing.advanced_table import CascadeTabNetDetector
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from mmrag.document_processing.table import TableDetector
 from rich.console import Console
 from rich.panel import Panel
@@ -17,6 +18,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table as RichTable
 from rich.tree import Tree
 from rich.markdown import Markdown
+import psutil # Added for memory monitoring
 
 app = typer.Typer(help="Extract and analyze tables from documents.")
 console = Console()
@@ -32,6 +34,8 @@ def extract_tables(
     min_cols: int = 2,
     analyze_tables: bool = False,
     show_extraction_details: bool = False,
+    timeout_seconds: int = 30, # Added timeout
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
 ) -> Dict[str, Any]:
     """Extract tables from a document using basic or advanced detection.
     
@@ -45,6 +49,8 @@ def extract_tables(
         min_cols: Minimum number of columns for a valid table
         analyze_tables: Whether to analyze table content using patterns
         show_extraction_details: Show detailed information about the extraction process
+        timeout_seconds: Maximum processing time in seconds.
+        memory_limit_fraction: Maximum fraction of available memory to use.
         
     Returns:
         Dictionary with extraction results
@@ -53,6 +59,13 @@ def extract_tables(
     if not file_path.exists():
         console.print(f"[bold red]Error:[/] File {file_path} does not exist")
         raise typer.Exit(code=1)
+
+    # Resource monitoring setup
+    start_time = time.time()
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    console.print(f"Resource limits: Timeout={timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
     
     # Set up the table detector
     try:
@@ -102,12 +115,21 @@ def extract_tables(
         ) as progress:
             task = progress.add_task(f"Processing document: {file_path.name}", total=None)
             
-            # Track extraction time
-            start_time = time.time()
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Processing exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
+            # Process document
             document = processor.process(file_path)
-            extraction_time = time.time() - start_time
+            processing_time = time.time() - start_time
             
-            progress.update(task, completed=True, description=f"Processed document in {extraction_time:.2f}s")
+            progress.update(task, completed=True, description=f"Processed document in {processing_time:.2f}s")
     except Exception as e:
         console.print(f"[bold red]Error processing document:[/] {e}")
         import traceback
@@ -130,8 +152,8 @@ def extract_tables(
         console.print(f"Document ID: {document.document_id}")
         console.print(f"Document Pages: {document.metadata.get('page_count', 'Unknown')}")
         console.print(f"Table Detection Method: {detector_name}")
-        console.print(f"Extraction Time: {extraction_time:.2f}s")
-        console.print(f"Average Time Per Table: {extraction_time / len(tables):.2f}s")
+        console.print(f"Processing Time: {processing_time:.2f}s")
+        console.print(f"Average Time Per Table: {processing_time / len(tables):.2f}s")
     
     # Set up output directory if specified
     if output_format and output_dir:
@@ -148,7 +170,7 @@ def extract_tables(
         "filename": file_path.name,
         "table_count": len(tables),
         "extraction_method": detector_name,
-        "extraction_time": extraction_time,
+        "processing_time": processing_time,
         "tables": []
     }
     
@@ -519,6 +541,8 @@ def extract(
     min_cols: int = typer.Option(2, "--min-cols", help="Minimum number of columns for a valid table"),
     analyze: bool = typer.Option(False, "--analyze", "-a", help="Analyze table content for patterns"),
     details: bool = typer.Option(False, "--details", "-d", help="Show detailed information about the extraction process"),
+    timeout: int = typer.Option(30, "--timeout", help="Processing timeout in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Extract tables from a document."""
     if format not in ["csv", "json", "html", "md", "none"]:
@@ -526,6 +550,11 @@ def extract(
         console.print("Supported formats: csv, json, html, md, none")
         raise typer.Exit(code=1)
     
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
+
     try:
         extract_tables(
             file_path=file_path,
@@ -536,7 +565,9 @@ def extract(
             min_rows=min_rows,
             min_cols=min_cols,
             analyze_tables=analyze,
-            show_extraction_details=details
+            show_extraction_details=details,
+            timeout_seconds=timeout,
+            memory_limit_fraction=mem_limit,
         )
     except KeyboardInterrupt:
         console.print("\n[bold yellow]Table extraction interrupted by user[/]")
@@ -551,6 +582,8 @@ def batch(
     format: str = typer.Option("csv", "--format", "-f", help="Output format for tables (csv, json, html, md, or none)"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output directory for extracted tables"),
     analyze: bool = typer.Option(False, "--analyze", "-a", help="Analyze table content for patterns"),
+    timeout: int = typer.Option(30, "--timeout", help="Processing timeout per file in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit per file as fraction of available memory (0.1-1.0)"),
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit number of files to process"),
 ):
     """Batch extract tables from multiple documents."""
@@ -563,6 +596,11 @@ def batch(
     if format not in ["csv", "json", "html", "md", "none"]:
         console.print(f"[bold red]Error:[/] Invalid output format: {format}")
         console.print("Supported formats: csv, json, html, md, none")
+        raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
         raise typer.Exit(code=1)
     
     # Find matching files
@@ -604,7 +642,9 @@ def batch(
                 advanced=not basic,
                 output_format=None if format == "none" else format,
                 output_dir=file_output_dir,
-                analyze_tables=analyze
+                analyze_tables=analyze,
+                timeout_seconds=timeout,
+                memory_limit_fraction=mem_limit,
             )
             
             # Add to summary

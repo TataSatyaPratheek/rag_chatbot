@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time # Import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -47,12 +48,18 @@ def get_compatible_examples(file_path: Path) -> Set[str]:
     return FILE_TYPE_MAP.get(file_suffix, set())
 
 
-def run_example(example_path: Path, file_path: Path, verbose: bool = False) -> bool:
+def run_example(
+    example_path: Path,
+    file_path: Path,
+    timeout: int, # Added timeout parameter
+    verbose: bool = False
+) -> bool:
     """Run a single example on a file."""
     example_name = os.path.basename(example_path)
     example_dir = os.path.dirname(example_path)
     example_rel_path = example_path.relative_to(example_path.parent.parent)
     
+    start_run_time = time.time() # Record start time
     console.print(f"Running {example_rel_path} on {file_path.name}")
     
     # Create command with appropriate arguments
@@ -61,19 +68,20 @@ def run_example(example_path: Path, file_path: Path, verbose: bool = False) -> b
         str(example_path),
     ]
 
-    # Handle command structure based on script name and module
+    # --- Restructured Logic ---
+    # Handle specific command structures first
     if "basic_rag/rag_chatbot.py" in str(example_path):
-        cmd.extend(["--documents", str(file_path)])
-    
+        # Needs the 'run' command and the file path passed via --documents option
+        cmd.extend(["run", "--documents", str(file_path)])
     elif "basic_rag/vector_search.py" in str(example_path):
         cmd.extend(["interactive", "--document", str(file_path)])
-    
     elif "basic_rag/simple_pdf_processing.py" in str(example_path):
         cmd.extend([str(file_path)])
-    
     elif "llm_integration/ollama_integration.py" in str(example_path):
         cmd.extend(["analyze", str(file_path), "--model", "llama3.2:latest"])
-    
+    elif "llm_integration/huggingface_integration.py" in str(example_path):
+        # Assuming 'analyze' command structure similar to ollama
+        cmd.extend(["analyze", str(file_path)])
     elif "llm_integration/content_analysis.py" in str(example_path):
         cmd.extend(["analyze", str(file_path)])
     
@@ -100,32 +108,38 @@ def run_example(example_path: Path, file_path: Path, verbose: bool = False) -> b
             # Run the example with the temp directory
             try:
                 if verbose:
-                    result = subprocess.run(temp_cmd, check=True)
+                    # Pass timeout to subprocess
+                    result = subprocess.run(temp_cmd, check=True, timeout=timeout)
                 else:
                     result = subprocess.run(
                         temp_cmd, 
                         check=True,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
-                        text=True
+                        text=True,
+                        timeout=timeout # Pass timeout to subprocess
                     )
                 console.print(f"[green]✓[/] Example completed successfully")
                 return True
             except subprocess.CalledProcessError as e:
                 console.print(f"[bold red]✗ Error running example:[/] {e}")
-                if not verbose and e.stderr:
+                if not verbose and e.stderr: # Check stderr for specific errors
+                    if "ProcessingTimeoutError" in e.stderr or "MemoryLimitExceededError" in e.stderr:
+                         console.print(f"[yellow]Processing stopped due to resource limits.[/]")
                     console.print(f"[red]Error details:[/] {e.stderr}")
+                return False
+            except subprocess.TimeoutExpired:
+                console.print(f"[bold red]✗ Timeout:[/] Example exceeded {timeout}s limit and was terminated.")
                 return False
             except Exception as e:
                 console.print(f"[bold red]✗ Unexpected error:[/] {e}")
                 return False
-    
+            # concurrent_processing handled above, return early
+            return True # Return success status from the try block
     elif "multimodal_rag/process_complex_document.py" in str(example_path):
         cmd.extend(["process", str(file_path)])
-    
     elif "multimodal_rag/multimodal_retrieval.py" in str(example_path):
         cmd.extend(["process", str(file_path)])
-    
     elif "multimodal_rag/table_extraction.py" in str(example_path):
         cmd.extend(["extract", str(file_path)])
     
@@ -133,11 +147,12 @@ def run_example(example_path: Path, file_path: Path, verbose: bool = False) -> b
         # Default behavior for other scripts
         cmd.append(str(file_path))
     
-    try:
+    try: # This try block now handles the default case and scripts not handled above
         # Run the example
         if verbose:
             # Show output directly
-            result = subprocess.run(cmd, check=True)
+            # Pass timeout to subprocess
+            result = subprocess.run(cmd, check=True, timeout=timeout)
         else:
             # Capture output
             result = subprocess.run(
@@ -145,15 +160,23 @@ def run_example(example_path: Path, file_path: Path, verbose: bool = False) -> b
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                timeout=timeout # Pass timeout to subprocess
             )
         
-        console.print(f"[green]✓[/] Example completed successfully")
+        elapsed_run_time = time.time() - start_run_time # Calculate elapsed time
+        console.print(f"[green]✓[/] Example completed successfully in {elapsed_run_time:.2f}s")
         return True
     except subprocess.CalledProcessError as e:
         console.print(f"[bold red]✗ Error running example:[/] Command '{' '.join(cmd)}' returned non-zero exit status {e.returncode}")
+        # Check stderr for specific resource errors
+        if not verbose and e.stderr and ("ProcessingTimeoutError" in e.stderr or "MemoryLimitExceededError" in e.stderr): # Check stderr
+             console.print(f"[yellow]Processing likely stopped due to resource limits.[/]")
         if not verbose and e.stderr:
             console.print(f"[red]Error details:[/] {e.stderr}")
+        return False
+    except subprocess.TimeoutExpired:
+        console.print(f"[bold red]✗ Timeout:[/] Example exceeded {timeout}s limit and was terminated.")
         return False
     except Exception as e:
         console.print(f"[bold red]✗ Unexpected error:[/] {e}")
@@ -164,6 +187,7 @@ def run_all(
     directory: Path = typer.Argument(..., help="Directory containing documents to process"),
     example_dir: Optional[Path] = typer.Option(None, "--examples", "-e", help="Directory containing example scripts"),
     pattern: str = typer.Option("*.*", "--pattern", "-p", help="File pattern to match"),
+    timeout: int = typer.Option(90, "--timeout", help="Timeout in seconds for each example run"), # Added timeout option
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ):
     """Run all compatible examples on matching files."""
@@ -233,7 +257,7 @@ def run_all(
                 continue
             
             # Run the example
-            success = run_example(example_path, file_path, verbose)
+            success = run_example(example_path, file_path, timeout=timeout, verbose=verbose) # Pass timeout
             
             file_results.append({
                 "example": example_name,
@@ -287,6 +311,7 @@ def run_single(
     example: str = typer.Argument(..., help="Example name (path relative to examples directory)"),
     file: Path = typer.Argument(..., help="Path to document file"),
     example_dir: Optional[Path] = typer.Option(None, "--examples", "-e", help="Directory containing example scripts"),
+    timeout: int = typer.Option(90, "--timeout", help="Timeout in seconds for the example run"), # Added timeout option
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ):
     """Run a specific example on a file."""
@@ -326,7 +351,7 @@ def run_single(
         raise typer.Exit(code=1)
     
     # Run the example
-    success = run_example(example_path, file, verbose)
+    success = run_example(example_path, file, timeout=timeout, verbose=verbose) # Pass timeout
     
     if not success:
         raise typer.Exit(code=1)

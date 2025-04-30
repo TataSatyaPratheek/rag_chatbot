@@ -5,21 +5,82 @@ import json
 import logging
 from typing import Dict, List, Optional, Union
 
+import torch # Import torch to check devices
+import dspy
+
 from mmrag.document_processing.base import DocumentElement, ProcessedDocument
 from mmrag.llm.client import LLMClientError, OllamaClient
+from mmrag.guardrails.processors import (
+    SummaryModule,
+    TopicsModule,
+    EntitiesModule,
+    TextAnalysisModule,
+    TableExtractionModule,
+    VisualElementModule,
+)
+from mmrag.config import config # Import config for model name
 
 logger = logging.getLogger(__name__)
 
 class ContentUnderstanding:
     """Content understanding using local LLMs."""
     
-    def __init__(self, llm_client: Optional[OllamaClient] = None):
+    def __init__(self, llm_client: Optional[OllamaClient] = None, dspy_lm: Optional[dspy.LM] = None):
         """Initialize content understanding.
+
+        Configures DSPy LM if not provided. Initializes DSPy modules for analysis tasks.
         
         Args:
             llm_client: LLM client. If None, creates a default one.
+            dspy_lm: Configured DSPy language model. If None, configures Ollama.
         """
         self.llm_client = llm_client or OllamaClient()
+
+        # Determine device for DSPy
+        if torch.cuda.is_available():
+            dspy_device = 'cuda'
+        elif torch.backends.mps.is_available(): # Check MPS only if CUDA not available
+            dspy_device = 'mps'
+        else:
+            dspy_device = 'cpu'
+        logger.info(f"Configuring DSPy device: {dspy_device}")
+        # Configure DSPy LM if not provided
+        if dspy_lm is None:
+            # Use model from config or fallback
+            model_name = self.llm_client.model or config.llm_model
+            base_url = self.llm_client.base_url or config.llm_base_url
+            # Ensure base_url ends with '/' for dspy.Ollama
+            if not base_url.endswith('/'):
+                base_url += '/'
+            try:
+                # Configure dspy.Ollama LM
+                self.lm = dspy.OllamaLocal(model=model_name, base_url=base_url, max_tokens=1024) # Use OllamaLocal
+                # Configure DSPy settings including the device
+                dspy.settings.configure(lm=self.lm, device=dspy_device)
+                logger.info(f"Configured DSPy with Ollama model: {model_name} at {base_url} on device: {dspy_device}")
+            except Exception as e:
+                logger.error(f"Failed to configure DSPy Ollama LM: {e}. Analysis modules might fail.")
+                self.lm = None # Indicate LM configuration failure
+        else:
+            self.lm = dspy_lm
+            dspy.settings.configure(lm=self.lm, device=dspy_device) # Configure DSPy settings including the device
+
+        # Initialize DSPy modules if LM is configured
+        if self.lm:
+            self.summary_module = SummaryModule()
+            self.topics_module = TopicsModule()
+            self.entities_module = EntitiesModule()
+            self.text_analysis_module = TextAnalysisModule()
+            self.table_extraction_module = TableExtractionModule()
+            self.visual_element_module = VisualElementModule()
+        else:
+            # Set modules to None if LM failed to configure
+            self.summary_module = None
+            self.topics_module = None
+            self.entities_module = None
+            self.text_analysis_module = None
+            self.table_extraction_module = None
+            self.visual_element_module = None
     
     def analyze_document(self, document: ProcessedDocument) -> Dict:
         """Analyze a processed document and extract key information.
@@ -30,6 +91,11 @@ class ContentUnderstanding:
         Returns:
             Dictionary with analysis results.
         """
+        if not self.lm:
+            logger.error("DSPy LM not configured. Cannot perform document analysis.")
+            return {"summary": "Error: LLM not configured.", "topics": [], "entities": {}}
+
+
         try:
             # Prepare document text for analysis
             doc_text = self._prepare_document_text(document)
@@ -123,20 +189,12 @@ class ContentUnderstanding:
         Returns:
             Summary text.
         """
-        prompt = (
-            "Please provide a concise summary of the following document content. "
-            "Focus on the main points and key information:\n\n"
-            f"{text}\n\n"
-            "Summary:"
-        )
-        
-        system_prompt = "You are an AI assistant that summarizes documents accurately and concisely."
-        
-        return self.llm_client.generate_sync(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.3,  # Lower temperature for more focused output
-        )
+        if not self.summary_module:
+            raise LLMClientError("SummaryModule not initialized.")
+
+        result = self.summary_module(text=text)
+        return result.summary
+
     
     def _extract_key_topics(self, text: str) -> List[str]:
         """Extract key topics from the document.
@@ -147,41 +205,25 @@ class ContentUnderstanding:
         Returns:
             List of key topics.
         """
-        prompt = (
-            "Please analyze the following document content and extract 3-7 key topics "
-            "or themes. Provide the topics as a JSON array of strings:\n\n"
-            f"{text}\n\n"
-            "Key topics (JSON array):"
-        )
-        
-        system_prompt = "You are an AI assistant that analyzes documents and extracts key topics."
-        
-        response = self.llm_client.generate_sync(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.3,
-        )
-        
+        if not self.topics_module:
+            raise LLMClientError("TopicsModule not initialized.")
+
+        result = self.topics_module(text=text)
+        json_str = result.topics_json
+
         try:
             # Try to parse JSON array from response
-            topics = []
-            json_start = response.find("[")
-            json_end = response.rfind("]") + 1
-            
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
+            if json_str and json_str.strip():
                 topics = json.loads(json_str)
+                return topics if isinstance(topics, list) else [json_str] # Fallback if not list
             else:
-                # Fallback: split by lines and clean up
-                topics = [line.strip() for line in response.split("\n") if line.strip()]
-                # Remove bullet points and quotes
-                topics = [topic.strip("*-• \"'") for topic in topics]
+                return [] # Return empty list if JSON is empty
             
             return topics
         except (json.JSONDecodeError, ValueError):
             # If JSON parsing fails, return the raw response
             logger.warning("Failed to parse topics as JSON, returning raw response")
-            return [response]
+            return [json_str]
     
     def _extract_entities(self, text: str) -> Dict:
         """Extract entities from the document.
@@ -192,31 +234,19 @@ class ContentUnderstanding:
         Returns:
             Dictionary with entity types and values.
         """
-        prompt = (
-            "Please analyze the following document content and extract key entities such as "
-            "people, organizations, locations, dates, and numerical values. "
-            "Provide the entities as a JSON object with entity types as keys and arrays of values:\n\n"
-            f"{text}\n\n"
-            "Entities (JSON object):"
-        )
-        
-        system_prompt = "You are an AI assistant that analyzes documents and extracts named entities."
-        
-        response = self.llm_client.generate_sync(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.3,
-        )
-        
+        if not self.entities_module:
+            raise LLMClientError("EntitiesModule not initialized.")
+
+        result = self.entities_module(text=text)
+        json_str = result.entities_json
+
         try:
             # Try to parse JSON object from response
-            entities = {}
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
+            if json_str and json_str.strip():
                 entities = json.loads(json_str)
+                return entities if isinstance(entities, dict) else {} # Fallback if not dict
+            else:
+                return {} # Return empty dict if JSON is empty
             
             return entities
         except (json.JSONDecodeError, ValueError):
@@ -234,44 +264,25 @@ class ContentUnderstanding:
         Returns:
             Analysis results.
         """
+        if not self.text_analysis_module:
+            raise LLMClientError("TextAnalysisModule not initialized.")
+
         text = element.content
-        
-        if len(text) < 50:  # Short text might be a heading
-            prompt = f"Analyze this short text fragment and determine if it's a heading, title, or regular text: '{text}'"
-        else:
-            prompt = (
-                f"Please analyze the following text content and provide:\n"
-                f"1. A brief summary\n"
-                f"2. The sentiment (positive, negative, or neutral)\n"
-                f"3. The purpose of this text (informative, persuasive, descriptive, etc.)\n\n"
-                f"Text: {text}\n\n"
-                f"Context: {context}\n\n"
-                f"Format your response as a JSON object with the fields: summary, sentiment, and purpose."
-            )
-        
-        system_prompt = "You are an AI assistant that analyzes text content objectively and accurately."
-        
-        response = self.llm_client.generate_sync(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.3,
-        )
-        
+
+        result = self.text_analysis_module(text=text, context=context)
+        json_str = result.analysis_json
+
         try:
             # Try to parse JSON object from response
-            result = {}
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
-                result = json.loads(json_str)
-                result["type"] = "text"
-                return result
+            if json_str and json_str.strip():
+                analysis = json.loads(json_str)
+                analysis["type"] = "text"
+                return analysis
             else:
-                return {"type": "text", "analysis": response}
+                # Fallback if JSON is empty
+                return {"type": "text", "analysis": "Analysis could not be generated."}
         except (json.JSONDecodeError, ValueError):
-            return {"type": "text", "analysis": response}
+            return {"type": "text", "analysis": json_str}
     
     def _analyze_table_element(self, element: DocumentElement, context: str = "") -> Dict:
         """Analyze a table element.
@@ -283,6 +294,9 @@ class ContentUnderstanding:
         Returns:
             Analysis results.
         """
+        if not self.table_extraction_module:
+            raise LLMClientError("TableExtractionModule not initialized.")
+
         # Prepare table content as text
         table_content = element.content
         table_text = ""
@@ -294,41 +308,23 @@ class ContentUnderstanding:
                     table_rows.append(" | ".join(str(cell) for cell in row))
             table_text = "\n".join(table_rows)
         else:
-            table_text = str(table_content)
-            
-        prompt = (
-            f"Please analyze the following table and provide:\n"
-            f"1. A brief description of what this table represents\n"
-            f"2. The key insights or findings from this table\n"
-            f"3. Any trends or patterns visible in the data\n\n"
-            f"Table:\n{table_text}\n\n"
-            f"Context: {context}\n\n"
-            f"Format your response as a JSON object with the fields: description, insights, and trends."
-        )
-        
-        system_prompt = "You are an AI assistant that analyzes tabular data objectively and accurately."
-        
-        response = self.llm_client.generate_sync(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.3,
-        )
-        
+            table_text = str(table_content) # Fallback
+
+        result = self.table_extraction_module(table_region=table_text, context=context)
+        json_str = result.analysis_json
+
         try:
             # Try to parse JSON object from response
-            result = {}
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
-                result = json.loads(json_str)
-                result["type"] = "table"
-                return result
+            if json_str and json_str.strip():
+                analysis = json.loads(json_str)
+                analysis["type"] = "table"
+                return analysis
             else:
-                return {"type": "table", "analysis": response}
+                # Fallback if JSON is empty
+                return {"type": "table", "analysis": "Analysis could not be generated."}
         except (json.JSONDecodeError, ValueError):
-            return {"type": "table", "analysis": response}
+            # Fallback if JSON parsing fails
+            return {"type": "table", "analysis": json_str or "Analysis failed."}
     
     def _analyze_visual_element(self, element: DocumentElement, context: str = "") -> Dict:
         """Analyze a visual element.
@@ -340,58 +336,27 @@ class ContentUnderstanding:
         Returns:
             Analysis results.
         """
+        if not self.visual_element_module:
+            raise LLMClientError("VisualElementModule not initialized.")
+
         element_type = element.element_type
         metadata = element.metadata
-        
-        # For charts, we might have additional data
-        if element_type == "chart" and hasattr(element, "data") and element.data:
-            chart_data = element.data
-            chart_description = element.content
-            
-            prompt = (
-                f"Please analyze the following chart data and description, and provide:\n"
-                f"1. A comprehensive interpretation of what this chart shows\n"
-                f"2. The key insights or findings\n"
-                f"3. Any trends or patterns visible in the data\n\n"
-                f"Chart description: {chart_description}\n"
-                f"Chart data: {json.dumps(chart_data)}\n\n"
-                f"Context: {context}\n\n"
-                f"Format your response as a JSON object with the fields: interpretation, insights, and trends."
-            )
-        else:
-            # For images or other visual elements, we use metadata and context
-            element_desc = metadata.get("description", "No description available")
-            
-            prompt = (
-                f"Please analyze this visual element based on its metadata and context:\n"
-                f"Element type: {element_type}\n"
-                f"Description: {element_desc}\n"
-                f"Context: {context}\n\n"
-                f"Provide a meaningful interpretation of what this visual element might represent "
-                f"and its relevance to the document. Format your response as JSON with the fields: "
-                f"interpretation and relevance."
-            )
-        
-        system_prompt = "You are an AI assistant that analyzes visual content based on metadata and context."
-        
-        response = self.llm_client.generate_sync(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=0.4,
-        )
-        
+
+        # Prepare context string - include metadata if available
+        surrounding_text = f"Context: {context}. Metadata: {json.dumps(metadata)}"
+
+        result = self.visual_element_module(element_type=element_type, surrounding_text=surrounding_text)
+        json_str = result.analysis_json
+
         try:
             # Try to parse JSON object from response
-            result = {}
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
-                result = json.loads(json_str)
-                result["type"] = element_type
-                return result
+            if json_str and json_str.strip():
+                analysis = json.loads(json_str)
+                analysis["type"] = element_type
+                return analysis
             else:
-                return {"type": element_type, "analysis": response}
+                # Fallback if JSON is empty
+                return {"type": element_type, "analysis": "Analysis could not be generated."}
         except (json.JSONDecodeError, ValueError):
-            return {"type": element_type, "analysis": response}
+            # Fallback if JSON parsing fails
+            return {"type": element_type, "analysis": json_str or "Analysis failed."}

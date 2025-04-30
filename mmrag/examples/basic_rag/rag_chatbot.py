@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import time
 import os
 import tempfile
 from pathlib import Path
@@ -10,11 +11,15 @@ from typing import Dict, List, Optional, Union, Any
 import httpx
 import typer
 from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.factory import get_processor # Use factory
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import processing exceptions
+from mmrag.llm import LLMClientError # Import LLM exception from correct location
 from mmrag.vectordb import ChromaStore
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
+import psutil # Added for memory monitoring
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 app = typer.Typer(help="RAG Chatbot for document Q&A.")
@@ -29,7 +34,9 @@ class RAGChatbot:
         persist_dir: Optional[Path] = None, 
         collection_name: str = "rag_chatbot",
         llm_base_url: str = "http://localhost:11434/api",
-        llm_model: str = "llama3.2:latest"
+        llm_model: str = "llama3.2:latest",
+        timeout_seconds: int = 30, # Added timeout
+        memory_limit_fraction: float = 0.5, # Added memory limit fraction
     ):
         """Initialize the RAG chatbot."""
         # Set up vector store
@@ -59,12 +66,26 @@ class RAGChatbot:
         
         # Track loaded documents
         self.loaded_documents = {}
+
+        # Store resource limits
+        self.timeout_seconds = timeout_seconds
+        self.memory_limit_fraction = memory_limit_fraction
     
     def load_document(self, file_path: Path) -> Optional[Any]:
         """Load and process a document."""
         try:
+            # Resource monitoring setup
+            start_time = time.time()
+            process = psutil.Process(os.getpid())
+            initial_available_memory = psutil.virtual_memory().available
+            memory_limit_bytes = initial_available_memory * self.memory_limit_fraction
+            console.print(f"Resource limits for loading: Timeout={self.timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
             with Progress(
                 SpinnerColumn(),
+                # --- Resource Checks ---
+                # Note: Checks are placed here to run before the potentially long `processor.process`
+                # More granular checks could be added inside the processor if needed.
                 TextColumn("[progress.description]{task.description}"),
                 console=console
             ) as progress:
@@ -72,6 +93,15 @@ class RAGChatbot:
                 document = self.processor.process(file_path)
                 
                 # Add to vector store
+                elapsed_time = time.time() - start_time
+                if elapsed_time > self.timeout_seconds:
+                    raise ProcessingTimeoutError(f"Document loading exceeded {self.timeout_seconds} seconds limit.")
+                    
+                current_rss = process.memory_info().rss
+                if current_rss > memory_limit_bytes:
+                    raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                # --- End Resource Checks ---
+
                 progress.update(task, description=f"Indexing document: {file_path.name}")
                 self.store.add_document(document)
                 
@@ -144,6 +174,8 @@ class RAGChatbot:
                 return result.get("response", "")
         except httpx.HTTPStatusError as e:
             return f"Error: HTTP {e.response.status_code} - {e.response.text}"
+        except LLMClientError as e: # Catch specific LLM client errors
+            return f"LLM Error: {e}"
         except Exception as e:
             return f"Error querying LLM: {e}"
     
@@ -169,11 +201,25 @@ class RAGChatbot:
                 return result.get("response", "")
         except httpx.HTTPStatusError as e:
             return f"Error: HTTP {e.response.status_code} - {e.response.text}"
+        except LLMClientError as e: # Catch specific LLM client errors
+            return f"LLM Error: {e}"
         except Exception as e:
             return f"Error querying LLM: {e}"
     
     async def answer_query_async(self, query: str) -> str:
         """Answer a user query using RAG asynchronously."""
+        # Resource monitoring setup for query
+        start_query_time = time.time()
+        process = psutil.Process(os.getpid())
+        initial_available_memory = psutil.virtual_memory().available
+        memory_limit_bytes = initial_available_memory * self.memory_limit_fraction
+        # Note: Timeout for LLM query is handled by httpx timeout, 
+        # but we can add an overall timeout for the whole function if needed.
+        # overall_timeout = self.timeout_seconds * 2 # Example: double the loading timeout
+
+        console.print(f"Resource limits for query: Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
+
         # Step 1: Retrieve relevant context
         with Progress(
             SpinnerColumn(),
@@ -183,6 +229,14 @@ class RAGChatbot:
             task = progress.add_task("Searching...", total=None)
             context = self.retrieve_context(query)
             progress.update(task, completed=True)
+
+        # --- Resource Check after retrieval ---
+        current_rss = process.memory_info().rss
+        if current_rss > memory_limit_bytes:
+            raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) after retrieval exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+        # elapsed_query_time = time.time() - start_query_time
+        # if elapsed_query_time > overall_timeout:
+        #     raise ProcessingTimeoutError(f"Query processing exceeded {overall_timeout} seconds limit.")
         
         # Step 2: Construct prompt
         prompt = f"""You are a helpful assistant that answers questions based on the provided context.
@@ -206,6 +260,14 @@ If the context doesn't contain relevant information to answer the query, politel
             task = progress.add_task("Thinking...", total=None)
             response = await self.query_llm_async(prompt)
             progress.update(task, completed=True)
+
+        # --- Resource Check after LLM ---
+        current_rss = process.memory_info().rss
+        if current_rss > memory_limit_bytes:
+            raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) after LLM query exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+        # elapsed_query_time = time.time() - start_query_time
+        # if elapsed_query_time > overall_timeout:
+        #     raise ProcessingTimeoutError(f"Query processing exceeded {overall_timeout} seconds limit.")
         
         # Step 4: Update conversation history
         self.history.append({"role": "user", "content": query})
@@ -215,6 +277,18 @@ If the context doesn't contain relevant information to answer the query, politel
     
     def answer_query(self, query: str) -> str:
         """Answer a user query using RAG."""
+        # Resource monitoring setup for query
+        start_query_time = time.time()
+        process = psutil.Process(os.getpid())
+        initial_available_memory = psutil.virtual_memory().available
+        memory_limit_bytes = initial_available_memory * self.memory_limit_fraction
+        # Note: Timeout for LLM query is handled by httpx timeout, 
+        # but we can add an overall timeout for the whole function if needed.
+        # overall_timeout = self.timeout_seconds * 2 # Example: double the loading timeout
+
+        console.print(f"Resource limits for query: Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
+
         # Step 1: Retrieve relevant context
         with Progress(
             SpinnerColumn(),
@@ -224,6 +298,14 @@ If the context doesn't contain relevant information to answer the query, politel
             task = progress.add_task("Searching...", total=None)
             context = self.retrieve_context(query)
             progress.update(task, completed=True)
+
+        # --- Resource Check after retrieval ---
+        current_rss = process.memory_info().rss
+        if current_rss > memory_limit_bytes:
+            raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) after retrieval exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+        # elapsed_query_time = time.time() - start_query_time
+        # if elapsed_query_time > overall_timeout:
+        #     raise ProcessingTimeoutError(f"Query processing exceeded {overall_timeout} seconds limit.")
         
         # Step 2: Construct prompt
         prompt = f"""You are a helpful assistant that answers questions based on the provided context.
@@ -247,6 +329,14 @@ If the context doesn't contain relevant information to answer the query, politel
             task = progress.add_task("Thinking...", total=None)
             response = self.query_llm(prompt)
             progress.update(task, completed=True)
+
+        # --- Resource Check after LLM ---
+        current_rss = process.memory_info().rss
+        if current_rss > memory_limit_bytes:
+            raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) after LLM query exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+        # elapsed_query_time = time.time() - start_query_time
+        # if elapsed_query_time > overall_timeout:
+        #     raise ProcessingTimeoutError(f"Query processing exceeded {overall_timeout} seconds limit.")
         
         # Step 4: Update conversation history
         self.history.append({"role": "user", "content": query})
@@ -366,10 +456,17 @@ def run(
     model: str = typer.Option("llama3.2:latest", "--model", "-m", help="LLM model to use"),
     persist_dir: Optional[Path] = typer.Option(None, "--persist-dir", "-p", help="Directory to persist vector database"),
     conversation: Optional[Path] = typer.Option(None, "--conversation", "-c", help="Load a saved conversation"),
+    timeout: int = typer.Option(30, "--timeout", help="Processing timeout for loading in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Run the RAG chatbot."""
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
+
     # Initialize chatbot
-    chatbot = RAGChatbot(persist_dir=persist_dir, llm_model=model)
+    chatbot = RAGChatbot(persist_dir=persist_dir, llm_model=model, timeout_seconds=timeout, memory_limit_fraction=mem_limit)
     
     # Load conversation if specified
     if conversation and conversation.exists():
@@ -400,8 +497,15 @@ def batch(
     questions: Path = typer.Argument(..., help="File with list of questions, one per line"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file for answers"),
     model: str = typer.Option("llama3.2:latest", "--model", "-m", help="LLM model to use"),
+    timeout: int = typer.Option(30, "--timeout", help="Processing timeout for loading in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Run batch queries against a document."""
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
+
     if not document.exists():
         console.print(f"[bold red]Document not found:[/] {document}")
         raise typer.Exit(code=1)
@@ -412,7 +516,7 @@ def batch(
     
     # Initialize chatbot
     with tempfile.TemporaryDirectory() as temp_dir:
-        chatbot = RAGChatbot(persist_dir=temp_dir, llm_model=model)
+        chatbot = RAGChatbot(persist_dir=temp_dir, llm_model=model, timeout_seconds=timeout, memory_limit_fraction=mem_limit)
         
         # Load document
         console.print(f"Loading document: [bold blue]{document}[/]")

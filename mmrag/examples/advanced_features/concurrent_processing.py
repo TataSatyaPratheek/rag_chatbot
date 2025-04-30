@@ -11,17 +11,28 @@ from typing import Dict, List, Optional, Union, Any
 
 import typer
 from mmrag.document_processing.factory import get_processor
+# --- Added: Import exceptions and psutil ---
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError
 from mmrag.vectordb import ChromaStore
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.panel import Panel
+import psutil
+# --- End Added ---
 
 app = typer.Typer(help="Concurrent document processing example.")
 console = Console()
 
 
-def process_document(file_path: Path, enable_tables: bool = True, enable_images: bool = True) -> Dict[str, Any]:
+# --- Added: timeout and memory limit parameters ---
+def process_document(
+    file_path: Path,
+    enable_tables: bool = True,
+    enable_images: bool = True,
+    timeout_seconds: int = 60,
+    memory_limit_fraction: float = 0.5,
+) -> Dict[str, Any]:
     """Process a single document."""
     try:
         # Get the appropriate processor for this file type
@@ -31,7 +42,22 @@ def process_document(file_path: Path, enable_tables: bool = True, enable_images:
             extract_images=enable_images
         )
         
+        # --- Added: Resource monitoring setup ---
+        start_time = time.time()
+        process = psutil.Process(os.getpid())
+        initial_available_memory = psutil.virtual_memory().available
+        memory_limit_bytes = initial_available_memory * memory_limit_fraction
+        # --- End Added ---
+
         # Process the document
+        # --- Added: Resource checks ---
+        elapsed_time = time.time() - start_time
+        if elapsed_time > timeout_seconds:
+            raise ProcessingTimeoutError(f"Processing {file_path.name} exceeded {timeout_seconds}s limit.")
+        current_rss = process.memory_info().rss
+        if current_rss > memory_limit_bytes:
+            raise MemoryLimitExceededError(f"Memory usage for {file_path.name} ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+        # --- End Added ---
         doc = processor.process(file_path)
         
         return {
@@ -54,19 +80,32 @@ def process_document(file_path: Path, enable_tables: bool = True, enable_images:
         }
 
 
-async def process_document_async(file_path: Path, enable_tables: bool = True, enable_images: bool = True) -> Dict[str, Any]:
+# --- Added: timeout and memory limit parameters ---
+async def process_document_async(
+    file_path: Path,
+    enable_tables: bool = True,
+    enable_images: bool = True,
+    timeout_seconds: int = 60,
+    memory_limit_fraction: float = 0.5,
+) -> Dict[str, Any]:
     """Process a document asynchronously using a thread pool."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None, 
-        lambda: process_document(file_path, enable_tables, enable_images)
+        # --- Pass limits to the sync function ---
+        lambda: process_document(
+            file_path, enable_tables, enable_images, timeout_seconds, memory_limit_fraction
+        )
     )
 
 
 def process_documents_sequentially(
     file_paths: List[Path], 
     enable_tables: bool = True, 
-    enable_images: bool = True
+    enable_images: bool = True,
+    # --- Added: timeout and memory limit parameters ---
+    timeout_seconds: int = 60,
+    memory_limit_fraction: float = 0.5,
 ) -> List[Dict[str, Any]]:
     """Process documents one after another."""
     results = []
@@ -81,7 +120,10 @@ def process_documents_sequentially(
         
         for file_path in file_paths:
             progress.update(task, description=f"Processing {file_path.name}")
-            result = process_document(file_path, enable_tables, enable_images)
+            # --- Pass limits ---
+            result = process_document(
+                file_path, enable_tables, enable_images, timeout_seconds, memory_limit_fraction
+            )
             results.append(result)
             progress.advance(task)
     
@@ -92,7 +134,10 @@ def process_documents_concurrently(
     file_paths: List[Path], 
     max_workers: int = 4, 
     enable_tables: bool = True, 
-    enable_images: bool = True
+    enable_images: bool = True,
+    # --- Added: timeout and memory limit parameters ---
+    timeout_seconds: int = 60,
+    memory_limit_fraction: float = 0.5,
 ) -> List[Dict[str, Any]]:
     """Process documents concurrently using a thread pool."""
     results = []
@@ -108,7 +153,10 @@ def process_documents_concurrently(
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
             future_to_path = {
-                executor.submit(process_document, path, enable_tables, enable_images): path
+                # --- Pass limits ---
+                executor.submit(
+                    process_document, path, enable_tables, enable_images, timeout_seconds, memory_limit_fraction
+                ): path
                 for path in file_paths
             }
             
@@ -139,17 +187,22 @@ async def process_documents_asyncio(
     file_paths: List[Path], 
     max_concurrency: int = 4, 
     enable_tables: bool = True, 
-    enable_images: bool = True
+    enable_images: bool = True,
+    # --- Added: timeout and memory limit parameters ---
+    timeout_seconds: int = 60,
+    memory_limit_fraction: float = 0.5,
 ) -> List[Dict[str, Any]]:
     """Process documents using asyncio for concurrency.
     
     This can be more efficient than thread pools for I/O-bound operations.
     """
     # Create a semaphore to limit concurrency
-    semaphore = asyncio.Semaphore(max_concurrency)
+    # --- Limit concurrency based on workers ---
+    semaphore = asyncio.Semaphore(max_concurrency) 
     
     async def process_with_semaphore(file_path: Path) -> Dict[str, Any]:
         async with semaphore:
+            # --- Pass limits ---
             return await process_document_async(file_path, enable_tables, enable_images)
     
     # Create tasks for all files
@@ -222,6 +275,9 @@ def run( # Renamed from main to match patch, though keeping it as main would als
     no_tables: bool = typer.Option(False, "--no-tables", help="Disable table extraction"),
     no_images: bool = typer.Option(False, "--no-images", help="Disable image extraction"),
     index: bool = typer.Option(True, "--index/--no-index", help="Index documents in vector store"),
+    # --- Added: timeout and memory limit options ---
+    timeout: int = typer.Option(60, "--timeout", help="Processing timeout per file in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit per file as fraction of available memory (0.1-1.0)"),
     single_file: Optional[Path] = typer.Option(None, "--file", "-f", help="Process a single file instead of a directory"),
 ):
     """Process documents with different concurrency models."""
@@ -272,6 +328,11 @@ def run( # Renamed from main to match patch, though keeping it as main would als
     if workers < 1:
         console.print(f"[bold red]Error:[/] Worker count must be at least 1")
         raise typer.Exit(code=1)
+
+    # --- Added: Validate memory limit ---
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
     
     console.print(f"[bold]Processing Mode:[/] {mode}")
     console.print(f"[bold]Worker Count:[/] {workers}")
@@ -286,14 +347,18 @@ def run( # Renamed from main to match patch, though keeping it as main would als
             results = process_documents_sequentially(
                 file_paths, 
                 enable_tables=not no_tables,
-                enable_images=not no_images
+                enable_images=not no_images,
+                timeout_seconds=timeout, # Pass timeout
+                memory_limit_fraction=mem_limit, # Pass mem limit
             )
         elif mode == "concurrent":
             results = process_documents_concurrently(
                 file_paths, 
                 max_workers=workers,
                 enable_tables=not no_tables,
-                enable_images=not no_images
+                enable_images=not no_images,
+                timeout_seconds=timeout, # Pass timeout
+                memory_limit_fraction=mem_limit, # Pass mem limit
             )
         elif mode == "asyncio":
             # For asyncio mode, we need to run the event loop
@@ -301,7 +366,9 @@ def run( # Renamed from main to match patch, though keeping it as main would als
                 file_paths, 
                 max_concurrency=workers,
                 enable_tables=not no_tables,
-                enable_images=not no_images
+                enable_images=not no_images,
+                timeout_seconds=timeout, # Pass timeout
+                memory_limit_fraction=mem_limit, # Pass mem limit
             ))
     except KeyboardInterrupt:
         console.print("\n[bold yellow]Processing interrupted by user[/]")

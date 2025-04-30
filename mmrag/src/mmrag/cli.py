@@ -7,13 +7,15 @@ from pathlib import Path
 import subprocess
 from typing import List, Optional
 import typer
-from rich.console import Console
+from rich.console import Console # Keep this import
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 # Make sure these imports are direct, not from another module
 from mmrag.document_processing.factory import get_processor
 from mmrag.document_processing.base import ProcessedDocument
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import new exceptions
+from rich.progress import TimeElapsedColumn # Import TimeElapsedColumn
 from mmrag.vectordb import ChromaStore
 
 # Set up logging
@@ -66,6 +68,7 @@ def process(
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
+        TimeElapsedColumn(), # Add elapsed time column
         console=console,
     ) as progress:
         progress.add_task(description="Processing document...", total=None)
@@ -74,6 +77,9 @@ def process(
         try:
             processed_doc = processor.process(file_path)
         except Exception as e:
+            # Catch specific processing errors
+            if isinstance(e, (ProcessingTimeoutError, MemoryLimitExceededError)):
+                console.print(f"[bold red]Processing stopped:[/] {e}")
             progress.stop()
             console.print(f"[bold red]Error processing document:[/] {e}")
             raise typer.Exit(code=1)
@@ -143,6 +149,7 @@ def store(
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
+        TimeElapsedColumn(), # Add elapsed time column
         console=console,
     ) as progress:
         progress.add_task(description="Processing document...", total=None)
@@ -150,6 +157,9 @@ def store(
         try:
             processed_doc = processor.process(file_path)
         except Exception as e:
+            # Catch specific processing errors
+            if isinstance(e, (ProcessingTimeoutError, MemoryLimitExceededError)):
+                console.print(f"[bold red]Processing stopped:[/] {e}")
             progress.stop()
             console.print(f"[bold red]Error processing document:[/] {e}")
             raise typer.Exit(code=1)

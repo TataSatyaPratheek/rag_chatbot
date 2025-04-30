@@ -11,7 +11,7 @@ import fitz
 import numpy as np
 import torch
 import torch.nn as nn
-from PIL import Image, UnidentifiedImageError  # Added import for exception handling
+from PIL import Image, UnidentifiedImageError, Image as PILImage # Added import for exception handling and Image alias
 from torchvision.models.detection import maskrcnn_resnet50_fpn
 from torchvision.transforms.v2 import functional as F
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
@@ -38,7 +38,12 @@ class CascadeTabNetDetector:
         """
         # For simplicity, we're using MaskRCNN as a base model
         # In a production setting, you would load the actual CascadeTabNet weights
-        self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+        elif torch.backends.mps.is_available(): # Check for MPS only if CUDA is not available
+            self.device = torch.device('mps')
+        else:
+            self.device = torch.device('cpu')
         self.classes = [
             '__background__', 'table', 'table_bordered', 'table_borderless', 'table_rotated'
         ]
@@ -47,8 +52,8 @@ class CascadeTabNetDetector:
             # First try to load model with device specified directly
             self.model = self._load_model(model_path, device=self.device)
             self.model.eval()
-        except Exception as e:
-            logger.warning(f"Error loading model with device specified: {e}")
+        except Exception as e: # Catch potential errors during model loading on the primary device
+            logger.warning(f"Error loading model on primary device ({self.device}): {e}. Falling back to CPU.")
             # Fall back to CPU if needed
             self.device = torch.device('cpu')
             self.model = self._load_model(model_path, device=self.device)
@@ -129,8 +134,10 @@ class CascadeTabNetDetector:
         try:
             # Load image for processing
             try:
-                image = Image.open(img_path)
-                image_tensor = F.to_tensor(image).to(self.device)
+                # Suppress DecompressionBombWarning
+                PILImage.MAX_IMAGE_PIXELS = None
+                image = PILImage.open(img_path).convert("RGB") # Ensure 3 channels
+                image_tensor = F.to_dtype(F.to_image(image), dtype=torch.float32, scale=True).to(self.device)
                 
                 # Perform inference
                 with torch.no_grad():

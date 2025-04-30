@@ -8,8 +8,11 @@ from typing import Dict, List, Optional, Union
 import dspy
 
 from mmrag.guardrails.signatures import (
-    DocumentProcessingSignature,
+    SummarySignature,
+    TopicsSignature,
+    EntitiesSignature,
     TableExtractionSignature,
+    TextAnalysisSignature,
     VisualElementSignature,
 )
 
@@ -17,58 +20,67 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentProcessingModule(dspy.Module):
-    """Document processing module with DSPy guardrails."""
-    
+    """DEPRECATED: Use specific modules like SummaryModule, TopicsModule, etc."""
     def __init__(self):
         super().__init__()
-        # Use ChainOfThought for better reasoning and guardrails
-        self.predictor = dspy.ChainOfThought(DocumentProcessingSignature)
-    
-    def forward(self, document_content: str, document_type: str, page_number: int = 0):
-        """Process document content with guardrails."""
-        # Process with guardrails through ChainOfThought
-        result = self.predictor(
-            document_content=document_content,
-            document_type=document_type,
-            page_number=page_number,
-        )
-        
-        # Add validation guardrails
-        validated_result = self.validate_output(result)
-        
+        logger.warning("DocumentProcessingModule is deprecated. Use specific analysis modules.")
+        # You might keep a simple predictor if needed for basic structure,
+        # but the detailed analysis is moved to other modules.
+        # self.predictor = dspy.Predict(SimpleStructureSignature) # Example
+
+    def forward(self, *args, **kwargs):
+        raise NotImplementedError("DocumentProcessingModule is deprecated.")
+
+
+class SummaryModule(dspy.Module):
+    """Generates document summary using DSPy."""
+    def __init__(self):
+        super().__init__()
+        self.predictor = dspy.Predict(SummarySignature)
+
+    def forward(self, text: str):
+        result = self.predictor(text=text)
+        # Basic validation: ensure summary is not empty
+        if not result.summary or not result.summary.strip():
+            logger.warning("LLM returned empty summary.")
+            result.summary = "Summary could not be generated."
+        return result
+
+
+class TopicsModule(dspy.Module):
+    """Extracts key topics using DSPy."""
+    def __init__(self):
+        super().__init__()
+        self.predictor = dspy.Predict(TopicsSignature)
+
+    def forward(self, text: str):
+        result = self.predictor(text=text)
+        validated_result = self._validate_json_list_output(result, "topics_json")
         return validated_result
-    
-    def validate_output(self, result):
-        """Implement validation guardrails for the outputs."""
-        validated = result
-        
-        # Validate potential tables
-        try:
-            if result.potential_tables:
-                tables = json.loads(result.potential_tables)
-                if not isinstance(tables, list):
-                    # Fix format if not a list
-                    validated.potential_tables = json.dumps([])
-                    logger.warning("Invalid table format detected and corrected")
-        except json.JSONDecodeError:
-            # Fix if not valid JSON
-            validated.potential_tables = json.dumps([])
-            logger.warning("Invalid JSON in potential_tables fixed")
-        
-        # Validate visual elements
-        try:
-            if result.visual_elements:
-                elements = json.loads(result.visual_elements)
-                if not isinstance(elements, list):
-                    # Fix format if not a list
-                    validated.visual_elements = json.dumps([])
-                    logger.warning("Invalid visual elements format detected and corrected")
-        except json.JSONDecodeError:
-            # Fix if not valid JSON
-            validated.visual_elements = json.dumps([])
-            logger.warning("Invalid JSON in visual_elements fixed")
-        
-        return validated
+
+
+class EntitiesModule(dspy.Module):
+    """Extracts named entities using DSPy."""
+    def __init__(self):
+        super().__init__()
+        self.predictor = dspy.Predict(EntitiesSignature)
+
+    def forward(self, text: str):
+        result = self.predictor(text=text)
+        validated_result = self._validate_json_dict_output(result, "entities_json")
+        return validated_result
+
+
+class TextAnalysisModule(dspy.Module):
+    """Analyzes text elements using DSPy."""
+    def __init__(self):
+        super().__init__()
+        self.predictor = dspy.Predict(TextAnalysisSignature)
+
+    def forward(self, text: str, context: str = ""):
+        result = self.predictor(text=text, context=context)
+        validated_result = self._validate_json_dict_output(result, "analysis_json")
+        return validated_result
 
 
 class TableExtractionModule(dspy.Module):
@@ -85,37 +97,10 @@ class TableExtractionModule(dspy.Module):
             context=context,
         )
         
-        validated_result = self.validate_output(result)
+        validated_result = self._validate_json_dict_output(result, "analysis_json")
         
         return validated_result
     
-    def validate_output(self, result):
-        """Validate and fix table extraction output."""
-        validated = result
-        
-        # Validate table data
-        try:
-            if result.table_data:
-                table = json.loads(result.table_data)
-                if not isinstance(table, list) or not all(isinstance(row, list) for row in table):
-                    # Create empty table if invalid
-                    validated.table_data = json.dumps([])
-                    validated.row_count = "0"
-                    validated.column_count = "0"
-                    logger.warning("Invalid table data format detected and corrected")
-                else:
-                    # Ensure row and column counts match the data
-                    validated.row_count = str(len(table))
-                    max_cols = max(len(row) for row in table) if table else 0
-                    validated.column_count = str(max_cols)
-        except json.JSONDecodeError:
-            # Fix if not valid JSON
-            validated.table_data = json.dumps([])
-            validated.row_count = "0"
-            validated.column_count = "0"
-            logger.warning("Invalid JSON in table_data fixed")
-        
-        return validated
 
 
 class VisualElementModule(dspy.Module):
@@ -132,50 +117,84 @@ class VisualElementModule(dspy.Module):
             surrounding_text=surrounding_text,
         )
         
-        validated_result = self.validate_output(result)
+        validated_result = self._validate_json_dict_output(result, "analysis_json")
         
         return validated_result
     
-    def validate_output(self, result):
-        """Validate and fix visual element output."""
-        validated = result
-        
-        # Validate extracted data
-        try:
-            if result.extracted_data and result.extracted_data.strip() not in ["N/A", "None", ""]:
-                # Try to parse as JSON
-                json.loads(result.extracted_data)
-                # If no exception, it's valid JSON
-            else:
-                # Set to empty object if not present or empty
-                validated.extracted_data = "{}"
-        except json.JSONDecodeError:
-            # If not valid JSON, try to fix common issues
-            fixed_json = self._attempt_json_repair(result.extracted_data)
-            if fixed_json:
-                validated.extracted_data = fixed_json
-            else:
-                validated.extracted_data = "{}"
-                logger.warning("Invalid JSON in extracted_data fixed")
-        
-        return validated
-    
-    def _attempt_json_repair(self, json_str: str) -> Optional[str]:
-        """Attempt to repair invalid JSON strings."""
-        if not json_str:
-            return "{}"
-        
-        # Try to fix common JSON errors
-        try:
-            # Fix missing quotes around keys
-            fixed = re.sub(r'(\w+):', r'"\1":', json_str)
-            # Fix single quotes
-            fixed = fixed.replace("'", '"')
-            # Validate
-            json.loads(fixed)
-            return fixed
-        except:
-            pass
-        
-        # If still not valid, return empty object
-        return None
+
+# --- Helper methods for validation (can be part of a base class or utility) ---
+
+def _validate_json_dict_output(self, result, field_name: str):
+    """Validate and fix JSON dictionary output."""
+    validated = result
+    json_str = getattr(result, field_name, "{}")
+
+    try:
+        if json_str and json_str.strip():
+            data = json.loads(json_str)
+            if not isinstance(data, dict):
+                setattr(validated, field_name, "{}")
+                logger.warning(f"Invalid dict format in {field_name} fixed.")
+        else:
+            setattr(validated, field_name, "{}")
+    except json.JSONDecodeError:
+        fixed_json = self._attempt_json_repair(json_str)
+        setattr(validated, field_name, fixed_json or "{}")
+        if not fixed_json:
+            logger.warning(f"Invalid JSON in {field_name} fixed.")
+    return validated
+
+def _validate_json_list_output(self, result, field_name: str):
+    """Validate and fix JSON list output."""
+    validated = result
+    json_str = getattr(result, field_name, "[]")
+    try:
+        data = json.loads(json_str)
+        if not isinstance(data, list):
+            setattr(validated, field_name, "[]")
+            logger.warning(f"Invalid list format in {field_name} fixed.")
+    except json.JSONDecodeError:
+        setattr(validated, field_name, "[]") # Fallback to empty list
+        logger.warning(f"Invalid JSON in {field_name} fixed.")
+    return validated
+
+def _attempt_json_repair(self, json_str: str) -> Optional[str]:
+    """Attempt to repair invalid JSON strings."""
+    if not json_str:
+        return "{}"
+
+    # Try to find JSON within potential markdown code blocks
+    match = re.search(r'```(json)?\s*(\{.*\}|\[.*\])\s*```', json_str, re.DOTALL)
+    if match:
+        json_str = match.group(2)
+
+    # Try to fix common JSON errors
+    try:
+        # Fix missing quotes around keys
+        fixed = re.sub(r'([{,]\s*)(\w+)(\s*:)', r'\1"\2"\3', json_str)
+        # Fix single quotes to double quotes
+        fixed = fixed.replace("'", '"')
+        # Remove trailing commas (simple cases)
+        fixed = re.sub(r',\s*([\}\]])', r'\1', fixed)
+        # Validate
+        json.loads(fixed)
+        logger.info("Successfully repaired JSON string.")
+        return fixed
+    except Exception as e:
+        logger.debug(f"JSON repair attempt failed: {e}")
+        pass
+
+    # If still not valid, return None
+    return None
+
+# Add validation methods to the modules
+EntitiesModule._validate_json_dict_output = _validate_json_dict_output
+EntitiesModule._attempt_json_repair = _attempt_json_repair
+TopicsModule._validate_json_list_output = _validate_json_list_output
+TopicsModule._attempt_json_repair = _attempt_json_repair # Needed if repair logic is complex
+TextAnalysisModule._validate_json_dict_output = _validate_json_dict_output
+TextAnalysisModule._attempt_json_repair = _attempt_json_repair
+TableExtractionModule._validate_json_dict_output = _validate_json_dict_output
+TableExtractionModule._attempt_json_repair = _attempt_json_repair
+VisualElementModule._validate_json_dict_output = _validate_json_dict_output
+VisualElementModule._attempt_json_repair = _attempt_json_repair

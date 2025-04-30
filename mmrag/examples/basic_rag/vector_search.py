@@ -1,6 +1,7 @@
 """Enhanced example of vector search using ChromaDB."""
 
 import json
+import os # Added for psutil
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple
@@ -8,11 +9,13 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 import typer
 from mmrag.document_processing import PDFProcessor
 from mmrag.vectordb import ChromaStore
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+import psutil # Added for memory monitoring
 from rich.text import Text
 from rich.tree import Tree
 
@@ -25,9 +28,20 @@ def index_document(
     persist_dir: Optional[Path] = None, 
     collection_name: str = "vector_search_demo",
     advanced_tables: bool = False,
-    enhanced_visual: bool = False
+    enhanced_visual: bool = False,
+    timeout_seconds: int = 60, # Added timeout (longer for indexing)
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
 ) -> Tuple[ChromaStore, Any]:
     """Process and index a document with enhanced options."""
+    # Resource monitoring setup
+    start_index_time = time.time()
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    console.print(f"Resource limits for indexing: Timeout={timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
+
+
     # Initialize document processor with configurable options
     processor = PDFProcessor(
         extract_tables=True,
@@ -43,6 +57,16 @@ def index_document(
         console=console
     ) as progress:
         task = progress.add_task(f"Processing document: {file_path.name}", total=None)
+        
+        # --- Resource Checks ---
+        elapsed_time = time.time() - start_index_time
+        if elapsed_time > timeout_seconds:
+            raise ProcessingTimeoutError(f"Processing exceeded {timeout_seconds} seconds limit.")
+            
+        current_rss = process.memory_info().rss
+        if current_rss > memory_limit_bytes:
+            raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+        # --- End Resource Checks ---
         start_time = time.time()
         document = processor.process(file_path)
         processing_time = time.time() - start_time
@@ -63,6 +87,16 @@ def index_document(
         console=console
     ) as progress:
         task = progress.add_task("Indexing document in vector database...", total=None)
+        
+        # --- Resource Checks ---
+        elapsed_time = time.time() - start_index_time
+        if elapsed_time > timeout_seconds:
+            raise ProcessingTimeoutError(f"Indexing exceeded {timeout_seconds} seconds limit.")
+            
+        current_rss = process.memory_info().rss
+        if current_rss > memory_limit_bytes:
+            raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+        # --- End Resource Checks ---
         start_time = time.time()
         store = ChromaStore(
             persist_directory=persist_dir,
@@ -101,10 +135,22 @@ def search_documents(
     query: str, 
     n_results: int = 5, 
     element_type: Optional[str] = None,
-    document_id: Optional[str] = None,
-    highlight_keywords: bool = True
+    document_id: Optional[str] = None, # Added document_id filter
+    highlight_keywords: bool = True,
+    timeout_seconds: int = 10, # Shorter timeout for queries
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
 ) -> Dict:
     """Search documents by semantic similarity with enhanced display options."""
+    # Resource monitoring setup for search
+    start_search_time = time.time()
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    # Note: Timeout check is simple here, could be more granular if needed
+    # console.print(f"Resource limits for search: Timeout={timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
+
+
     console.print(f"\nSearching for: [bold cyan]'{query}'[/]")
     
     # Prepare where filter
@@ -115,6 +161,16 @@ def search_documents(
         where["document_id"] = document_id
     
     # Query the database with timing
+    # --- Resource Checks ---
+    elapsed_time = time.time() - start_search_time
+    if elapsed_time > timeout_seconds:
+        raise ProcessingTimeoutError(f"Search preparation exceeded {timeout_seconds} seconds limit.")
+        
+    current_rss = process.memory_info().rss
+    if current_rss > memory_limit_bytes:
+        raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before query exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+    # --- End Resource Checks ---
+
     start_time = time.time()
     results = store.query(
         query_text=query,
@@ -122,6 +178,16 @@ def search_documents(
         where=where if where else None
     )
     search_time = time.time() - start_time
+
+    # --- Resource Checks ---
+    elapsed_time = time.time() - start_search_time
+    if elapsed_time > timeout_seconds:
+        raise ProcessingTimeoutError(f"Search query exceeded {timeout_seconds} seconds limit.")
+        
+    current_rss = process.memory_info().rss
+    if current_rss > memory_limit_bytes:
+        raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) after query exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+    # --- End Resource Checks ---
     
     # Format and display results
     console.print(f"\n[bold green]Search Results:[/] Found {len(results['ids'][0])} matches in {search_time:.3f}s")
@@ -281,7 +347,13 @@ def view_result_detail(
     console.print(Panel(tree, title=panel_title))
 
 
-def explore_vector_database(store: ChromaStore, document: Optional[Any] = None) -> None:
+def explore_vector_database(
+    store: ChromaStore, 
+    document: Optional[Any] = None,
+    timeout_seconds: int = 10, # Added timeout
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
+
+) -> None:
     """Interactive exploration of vector database contents."""
     console.print("\n[bold]Vector Database Explorer[/]")
     console.print("Type 'quit' to exit, 'filter <type>' to filter by element type")
@@ -383,7 +455,9 @@ def explore_vector_database(store: ChromaStore, document: Optional[Any] = None) 
             n_results=n_results, 
             element_type=current_filter,
             document_id=current_document_id,
-            highlight_keywords=highlight
+            highlight_keywords=highlight,
+            timeout_seconds=timeout_seconds, # Pass limits
+            memory_limit_fraction=memory_limit_fraction,
         )
 
 
@@ -394,10 +468,18 @@ def interactive(
     collection: str = typer.Option("vector_search_demo", "--collection", "-c", help="Collection name"),
     advanced_tables: bool = typer.Option(False, "--advanced-tables", help="Use advanced table detection"),
     enhanced_visual: bool = typer.Option(False, "--enhanced-visual", help="Use enhanced visual processing"),
+    index_timeout: int = typer.Option(60, "--index-timeout", help="Timeout for indexing in seconds"),
+    query_timeout: int = typer.Option(10, "--query-timeout", help="Timeout for queries in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Run in interactive exploration mode."""
     store = None
     processed_doc = None
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
     
     # Setup vector store
     if document:
@@ -411,8 +493,10 @@ def interactive(
             document, 
             persist_dir, 
             collection,
-            advanced_tables=advanced_tables,
-            enhanced_visual=enhanced_visual
+            advanced_tables=advanced_tables, # Closing parenthesis was missing
+            enhanced_visual=enhanced_visual, # Closing parenthesis was missing
+            timeout_seconds=index_timeout, # Pass index timeout
+            memory_limit_fraction=mem_limit, # Pass mem limit
         )
     else:
         # Try to load existing vector store
@@ -436,7 +520,7 @@ def interactive(
             raise typer.Exit(code=1)
     
     # Run the explorer
-    explore_vector_database(store, processed_doc)
+    explore_vector_database(store, processed_doc, timeout_seconds=query_timeout, memory_limit_fraction=mem_limit)
 
 
 @app.command()
@@ -450,10 +534,18 @@ def query(
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Save results to JSON file"),
     advanced_tables: bool = typer.Option(False, "--advanced-tables", help="Use advanced table detection"),
     enhanced_visual: bool = typer.Option(False, "--enhanced-visual", help="Use enhanced visual processing"),
+    index_timeout: int = typer.Option(60, "--index-timeout", help="Timeout for indexing in seconds"),
+    query_timeout: int = typer.Option(10, "--query-timeout", help="Timeout for queries in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Run a single query and display results."""
     store = None
     processed_doc = None
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
     
     # Setup vector store
     if document:
@@ -467,8 +559,10 @@ def query(
             document, 
             persist_dir, 
             collection,
-            advanced_tables=advanced_tables,
-            enhanced_visual=enhanced_visual
+            advanced_tables=advanced_tables, # Closing parenthesis was missing
+            enhanced_visual=enhanced_visual, # Closing parenthesis was missing
+            timeout_seconds=index_timeout, # Pass index timeout
+            memory_limit_fraction=mem_limit, # Pass mem limit
         )
     else:
         # Try to load existing vector store
@@ -487,7 +581,9 @@ def query(
         store, 
         query_text, 
         n_results=n_results, 
-        element_type=filter_type
+        element_type=filter_type, # Closing parenthesis was missing
+        timeout_seconds=query_timeout, # Pass query timeout
+        memory_limit_fraction=mem_limit, # Pass mem limit
     )
     
     # Save results if requested

@@ -2,11 +2,15 @@
 
 import hashlib
 import logging
+import os
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import fitz  # PyMuPDF
+import psutil
+
 from pydantic import ValidationError
 
 from mmrag.document_processing.base import (
@@ -20,6 +24,7 @@ from mmrag.document_processing.table import TableDetector
 from mmrag.document_processing.visual import VisualElementProcessor
 from mmrag.document_processing.advanced_table import CascadeTabNetDetector
 from mmrag.document_processing.enhanced_visual import EnhancedVisualProcessor
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +42,8 @@ class PDFProcessor(DocumentProcessor):
         visual_processor: Optional[Union[VisualElementProcessor, EnhancedVisualProcessor]] = None,
         enable_enhanced_visual: bool = False,
         enable_llm_analysis: bool = False,
+        timeout_seconds: int = 30,
+        memory_limit_fraction: float = 0.5,
     ):
         """Initialize the PDF processor."""
         self.extract_tables = extract_tables
@@ -44,6 +51,8 @@ class PDFProcessor(DocumentProcessor):
         self.advanced_table_detection = advanced_table_detection
         self.enable_enhanced_visual = enable_enhanced_visual
         self.enable_llm_analysis = enable_llm_analysis
+        self.timeout_seconds = timeout_seconds
+        self.memory_limit_fraction = memory_limit_fraction
         
         # Use advanced table detection if requested
         if advanced_table_detection:
@@ -79,6 +88,12 @@ class PDFProcessor(DocumentProcessor):
         
         if not self.supports(document_path):
             raise ValueError(f"Unsupported document type: {document_path.suffix}")
+            
+        # Resource monitoring setup
+        start_time = time.time()
+        process = psutil.Process(os.getpid())
+        initial_available_memory = psutil.virtual_memory().available
+        memory_limit_bytes = initial_available_memory * self.memory_limit_fraction
         
         # Generate a document ID based on file content
         document_id = self._generate_document_id(document_path)
@@ -94,6 +109,16 @@ class PDFProcessor(DocumentProcessor):
         
         # Process each page
         for page_idx, page in enumerate(doc):
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_time
+            if elapsed_time > self.timeout_seconds:
+                raise ProcessingTimeoutError(f"Processing exceeded {self.timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
             # Extract text blocks
             text_elements = self._extract_text_blocks(page, page_idx)
             elements.extend(text_elements)

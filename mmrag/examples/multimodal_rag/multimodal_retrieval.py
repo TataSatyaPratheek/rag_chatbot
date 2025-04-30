@@ -1,6 +1,7 @@
 """Enhanced example of multimodal document processing and retrieval."""
 
 import json
+import os # Added for psutil
 import tempfile
 import time
 from pathlib import Path
@@ -8,11 +9,13 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 
 import typer
 from mmrag.document_processing.factory import get_processor
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from mmrag.vectordb import ChromaStore
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
+import psutil # Added for memory monitoring
 from rich.markdown import Markdown
 from rich.tree import Tree
 
@@ -32,6 +35,8 @@ def process_multimodal(
     n_results: int = 5,
     visual_only: bool = False,
     output_json: Optional[Path] = None,
+    timeout_seconds: int = 60, # Added timeout (longer for processing + indexing)
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
 ) -> Dict[str, Any]:
     """Process a document with multimodal content and perform retrieval.
     
@@ -47,6 +52,8 @@ def process_multimodal(
         n_results: Number of results to return for queries
         visual_only: Only search for visual elements (images, charts)
         output_json: Path to save results as JSON
+        timeout_seconds: Maximum processing time in seconds.
+        memory_limit_fraction: Maximum fraction of available memory to use.
         
     Returns:
         Dictionary with processing and query results
@@ -56,6 +63,13 @@ def process_multimodal(
         console.print(f"[bold red]Error:[/] File {file_path} does not exist")
         raise typer.Exit(code=1)
     
+    # Resource monitoring setup
+    start_process_time = time.time()
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    console.print(f"Resource limits: Timeout={timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
     # Get appropriate processor for this file type
     try:
         with Progress(
@@ -94,6 +108,16 @@ def process_multimodal(
             console=console
         ) as progress:
             task = progress.add_task(f"Processing {file_path.name}...", total=None)
+            
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_process_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Processing exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
             document = processor.process(file_path)
             processing_time = time.time() - start_time
             progress.update(task, completed=True, description=f"Processed {file_path.name} in {processing_time:.2f}s")
@@ -145,6 +169,16 @@ def process_multimodal(
             
             progress.update(task, description="Adding document to vector store...")
             
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_process_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Indexing exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before indexing exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
             # Add document to vector store
             indexing_start = time.time()
             store.add_document(document)
@@ -180,6 +214,16 @@ def process_multimodal(
             ) as progress:
                 task = progress.add_task(f"Searching for: {query}", total=None)
                 
+                # --- Resource Checks ---
+                elapsed_time = time.time() - start_process_time
+                if elapsed_time > timeout_seconds:
+                    raise ProcessingTimeoutError(f"Query preparation exceeded {timeout_seconds} seconds limit.")
+                    
+                current_rss = process.memory_info().rss
+                if current_rss > memory_limit_bytes:
+                    raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before query exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                # --- End Resource Checks ---
+
                 # Prepare where filter for visual-only search
                 where = None
                 if visual_only:
@@ -193,6 +237,16 @@ def process_multimodal(
                     where=where
                 )
                 query_time = time.time() - query_start
+
+                # --- Resource Checks ---
+                elapsed_time = time.time() - start_process_time
+                if elapsed_time > timeout_seconds:
+                    raise ProcessingTimeoutError(f"Query exceeded {timeout_seconds} seconds limit.")
+                    
+                current_rss = process.memory_info().rss
+                if current_rss > memory_limit_bytes:
+                    raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) after query exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                # --- End Resource Checks ---
                 
                 progress.update(task, completed=True, description=f"Found {len(search_results['ids'][0])} results in {query_time:.3f}s")
             
@@ -359,11 +413,18 @@ def process(
     results: int = typer.Option(5, "--results", "-r", help="Number of results to return"),
     visual_only: bool = typer.Option(False, "--visual-only", help="Only search visual elements"),
     output_json: Optional[Path] = typer.Option(None, "--output", "-o", help="Save results to JSON file"),
+    timeout: int = typer.Option(60, "--timeout", help="Processing timeout in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
     analyze_only: bool = typer.Option(False, "--analyze-only", help="Only analyze document structure without processing"),
 ):
     """Process a multimodal document and perform retrieval."""
     # Check if file exists
     if not file_path.exists():
+        console.print(f"[bold red]Error:[/] File {file_path} does not exist")
+        raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
         console.print(f"[bold red]Error:[/] File {file_path} does not exist")
         raise typer.Exit(code=1)
     
@@ -383,7 +444,9 @@ def process(
             enhanced_visual=enhanced_visual,
             n_results=results,
             visual_only=visual_only,
-            output_json=output_json
+            output_json=output_json,
+            timeout_seconds=timeout,
+            memory_limit_fraction=mem_limit,
         )
     except KeyboardInterrupt:
         console.print("\n[bold yellow]Processing interrupted by user[/]")
@@ -399,11 +462,18 @@ def interactive(
     enhanced_visual: bool = typer.Option(False, "--enhanced-visual", help="Use enhanced visual processing"),
     store_dir: Optional[Path] = typer.Option(None, "--store-dir", "-s", help="Directory to store the vector database"),
     collection: str = typer.Option("multimodal_interactive", "--collection", "-c", help="Collection name"),
+    timeout: int = typer.Option(60, "--timeout", help="Processing timeout in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Run an interactive query session with a multimodal document."""
     # Check if file exists
     if not file_path.exists():
         console.print(f"[bold red]Error:[/] File {file_path} does not exist")
+        raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
         raise typer.Exit(code=1)
     
     # Process document first
@@ -416,6 +486,13 @@ def interactive(
         ) as progress:
             task = progress.add_task(f"Processing {file_path.name}...", total=None)
             
+            # Resource monitoring setup for initial processing
+            start_time = time.time()
+            process = psutil.Process(os.getpid())
+            initial_available_memory = psutil.virtual_memory().available
+            memory_limit_bytes = initial_available_memory * mem_limit
+            console.print(f"Resource limits: Timeout={timeout}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+            
             # Get appropriate processor
             processor = get_processor(
                 file_path,
@@ -425,6 +502,16 @@ def interactive(
                 enable_enhanced_visual=enhanced_visual,
             )
             
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout:
+                raise ProcessingTimeoutError(f"Processing exceeded {timeout} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
             # Process document
             document = processor.process(file_path)
             
@@ -463,6 +550,16 @@ def interactive(
                 collection_name=collection
             )
             
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout:
+                raise ProcessingTimeoutError(f"Indexing exceeded {timeout} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before indexing exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
             # Add document to vector store
             store.add_document(document)
             
@@ -483,6 +580,10 @@ def interactive(
         # Query loop
         current_filter = None
         n_results = 5
+        # Reset start time for query phase timeout
+        start_query_phase_time = time.time()
+        query_timeout = 15 # Shorter timeout for interactive queries
+        query_memory_limit_bytes = memory_limit_bytes # Reuse memory limit
         
         while True:
             # Show current filter if any
@@ -529,6 +630,16 @@ def interactive(
                 ) as progress:
                     task = progress.add_task(f"Searching: {user_input}", total=None)
                     
+                    # --- Resource Checks ---
+                    elapsed_time = time.time() - start_query_phase_time
+                    if elapsed_time > query_timeout:
+                        raise ProcessingTimeoutError(f"Query exceeded {query_timeout} seconds limit.")
+                        
+                    current_rss = process.memory_info().rss
+                    if current_rss > query_memory_limit_bytes:
+                        raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) during query exceeded limit ({query_memory_limit_bytes / (1024**2):.2f} MB).")
+                    # --- End Resource Checks ---
+
                     # Prepare where filter
                     where = {"element_type": current_filter} if current_filter else None
                     
@@ -602,12 +713,20 @@ def batch(
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Output directory for results"),
     results_per_doc: int = typer.Option(3, "--results-per-doc", "-r", help="Number of results per document"),
     top_overall: int = typer.Option(10, "--top-overall", "-t", help="Number of top results to display across all documents"),
+    timeout: int = typer.Option(60, "--timeout", help="Processing timeout per file in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit per file as fraction of available memory (0.1-1.0)"),
 ):
     """Process multiple documents and search for a query."""
     # Validate directory exists
     if not directory.exists() or not directory.is_dir():
         console.print(f"[bold red]Error:[/] Directory {directory} does not exist")
         raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        if not directory.exists() or not directory.is_dir():
+            console.print(f"[bold red]Error:[/] Directory {directory} does not exist")
+            raise typer.Exit(code=1)
     
     # Find matching files
     files = list(directory.glob(pattern))
@@ -645,7 +764,9 @@ def batch(
                     extract_tables=True,
                     extract_images=True,
                     n_results=results_per_doc,
-                    store_dir=Path(temp_dir)
+                    store_dir=Path(temp_dir),
+                    timeout_seconds=timeout, # Pass timeout
+                    memory_limit_fraction=mem_limit, # Pass mem limit
                 )
             
             # Add filename and document info to results

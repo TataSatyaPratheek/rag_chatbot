@@ -2,11 +2,19 @@
 import pytest
 import os
 import httpx
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+import json
+
+import dspy # Import dspy
 
 from mmrag.document_processing import PDFProcessor
 from mmrag.llm import ContentUnderstanding, OllamaClient
-
+# Import the DSPy modules we need to mock
+from mmrag.guardrails.processors import (
+    SummaryModule,
+    TopicsModule,
+    EntitiesModule,
+)
 @pytest.mark.integration
 class TestLLMIntegration:
     """Integration tests for LLM integration."""
@@ -78,30 +86,39 @@ class TestLLMIntegration:
         analysis_fields = [key for key in result.keys() if key != "type"]
         assert len(analysis_fields) > 0
     
-    @patch.object(OllamaClient, "generate_sync")
-    def test_analysis_with_mocked_llm(self, mock_generate_sync, sample_pdf_path):
+    # Patch the DSPy modules within ContentUnderstanding
+    @patch.object(SummaryModule, "forward", autospec=True)
+    @patch.object(TopicsModule, "forward", autospec=True)
+    @patch.object(EntitiesModule, "forward", autospec=True)
+    def test_analysis_with_mocked_dspy_modules(
+        self, mock_entities_forward, mock_topics_forward, mock_summary_forward, sample_pdf_path
+    ):
         """Test document analysis with mocked LLM responses."""
-        # Mock the LLM responses
+        # Define mock DSPy Prediction outputs
         mock_responses = {
-            "summary": "This is a mock summary of the document.",
-            "topics": ["Topic 1", "Topic 2", "Topic 3"],
+            "summary": dspy.Prediction(summary="This is a mock summary of the document."),
+            "topics": dspy.Prediction(topics_json='["Topic 1", "Topic 2", "Topic 3"]'),
             "entities": {
-                "people": ["John Doe"],
-                "organizations": ["ACME Corp"]
+                "entities_json": '{"people": ["John Doe"], "organizations": ["ACME Corp"]}'
             }
         }
-        
-        # Setup mock to return appropriate responses based on input
-        def mock_response(prompt, **kwargs):
-            if "summary" in prompt.lower():
-                return mock_responses["summary"]
-            elif "topic" in prompt.lower():
-                return str(mock_responses["topics"])
-            elif "entit" in prompt.lower():
-                return str(mock_responses["entities"])
-            return "Mock response"
-        
-        mock_generate_sync.side_effect = mock_response
+
+        # Configure the mocks to return the predefined Prediction objects
+        mock_summary_forward.return_value = mock_responses["summary"]
+        mock_topics_forward.return_value = mock_responses["topics"]
+        mock_entities_forward.return_value = dspy.Prediction(
+            entities_json=mock_responses["entities"]["entities_json"]
+        )
+
+        # Mock the dspy LM configuration to avoid actual LLM calls during init
+        # We can mock dspy.settings.configure or the Ollama class itself if needed,
+        # but mocking the forward methods of the modules used is more direct here.
+        # Ensure DSPy settings are configured with *some* LM, even if mocked later.
+        # If ContentUnderstanding fails without a configured LM, mock that part too.
+        # For simplicity, assume ContentUnderstanding handles LM init failure or mock it.
+        # Let's mock the Ollama LM init within ContentUnderstanding for safety:
+        with patch("mmrag.llm.content_understanding.dspy.Ollama") as mock_dspy_ollama:
+            mock_dspy_ollama.return_value = MagicMock() # Return a dummy LM
         
         # Initialize processor with LLM analysis
         processor = PDFProcessor(
@@ -116,4 +133,13 @@ class TestLLMIntegration:
         # Check that analysis field exists with mock data
         assert doc.analysis is not None
         assert "summary" in doc.analysis
-        assert doc.analysis["summary"] == mock_responses["summary"]
+        assert doc.analysis["summary"] == mock_responses["summary"].summary
+        assert "topics" in doc.analysis
+        assert doc.analysis["topics"] == json.loads(mock_responses["topics"].topics_json)
+        assert "entities" in doc.analysis
+        assert doc.analysis["entities"] == json.loads(mock_responses["entities"]["entities_json"])
+
+        # Verify the mocks were called
+        mock_summary_forward.assert_called_once()
+        mock_topics_forward.assert_called_once()
+        mock_entities_forward.assert_called_once()

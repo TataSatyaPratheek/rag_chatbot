@@ -86,7 +86,12 @@ class ChromaStore:
         if self.embedding_model is None:
             logger.info(f"Loading embedding model: {self.embedding_model_name}")
             # Explicitly set device to handle potential MPS/meta tensor issues
-            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available(): # Check for MPS only if CUDA is not available
+                device = "mps"
+            else:
+                device = "cpu"
             
             try:
                 # Try direct initialization with device parameter

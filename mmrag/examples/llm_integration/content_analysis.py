@@ -1,6 +1,7 @@
 """Enhanced example of document content analysis using local LLMs."""
 
 import json
+import os # Added for psutil
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple
@@ -8,11 +9,13 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 import typer
 from mmrag.document_processing import PDFProcessor
 from mmrag.llm import OllamaClient, ContentUnderstanding
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.tree import Tree
+import psutil # Added for memory monitoring
 
 app = typer.Typer(help="Document content analysis using local LLMs.")
 console = Console()
@@ -27,7 +30,8 @@ def analyze_document_content(
     extract_images: bool = True,
     advanced_tables: bool = False,
     analyze_elements: bool = True,
-    timeout: int = 120,
+    timeout_seconds: int = 120, # Renamed from timeout
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
 ) -> Optional[Dict[str, Any]]:
     """Analyze document content using a local LLM with enhanced features.
     
@@ -40,11 +44,19 @@ def analyze_document_content(
         extract_images: Whether to extract images
         advanced_tables: Whether to use advanced table detection
         analyze_elements: Whether to analyze individual elements
-        timeout: Timeout for LLM requests in seconds
+        timeout_seconds: Maximum processing time in seconds.
+        memory_limit_fraction: Maximum fraction of available memory to use.
         
     Returns:
         Dictionary containing the analysis results, or None if an error occurred
     """
+    # Resource monitoring setup
+    start_analysis_time = time.time()
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    console.print(f"Resource limits: Timeout={timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
     # Initialize LLM client
     try:
         with Progress(
@@ -54,7 +66,7 @@ def analyze_document_content(
         ) as progress:
             task = progress.add_task("Initializing LLM client...", total=None)
             
-            client = OllamaClient(model=model_name, timeout=timeout)
+            client = OllamaClient(model=model_name, timeout=timeout_seconds) # Use timeout_seconds
             test_response = client.generate_sync("Hello, are you working?", max_tokens=20)
             
             progress.update(task, completed=True)
@@ -81,6 +93,16 @@ def analyze_document_content(
             console=console
         ) as progress:
             task = progress.add_task(f"Processing document: {file_path.name}", total=None)
+            
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_analysis_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Processing exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
             document = processor.process(file_path)
             progress.update(task, completed=True)
         
@@ -117,6 +139,16 @@ def analyze_document_content(
         ) as progress:
             task = progress.add_task("Analyzing document content...", total=None)
             
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_analysis_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Analysis exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before LLM analysis exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
             # Track start time for performance metrics
             start_time = time.time()
             document_analysis = analyzer.analyze_document(document)
@@ -171,6 +203,16 @@ def analyze_document_content(
                             console=console
                         ) as progress:
                             task = progress.add_task("Analyzing...", total=None)
+                            
+                            # --- Resource Checks ---
+                            elapsed_time = time.time() - start_analysis_time
+                            if elapsed_time > timeout_seconds:
+                                raise ProcessingTimeoutError(f"Element analysis exceeded {timeout_seconds} seconds limit.")
+                                
+                            current_rss = process.memory_info().rss
+                            if current_rss > memory_limit_bytes:
+                                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) during element analysis exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                            # --- End Resource Checks ---
                             analysis = analyzer.analyze_element(element)
                             progress.update(task, completed=True)
                         
@@ -335,11 +377,17 @@ def analyze(
     no_images: bool = typer.Option(False, "--no-images", help="Disable image extraction"),
     advanced_tables: bool = typer.Option(False, "--advanced-tables", help="Use advanced table detection"),
     no_element_analysis: bool = typer.Option(False, "--no-element-analysis", help="Skip individual element analysis"),
-    timeout: int = typer.Option(120, "--timeout", "-t", help="Timeout for LLM requests in seconds"),
+    timeout: int = typer.Option(120, "--timeout", "-t", help="Processing timeout in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Analyze a document with a local LLM."""
     # Validate file exists
     if not file_path.exists():
+        console.print(f"[bold red]Error:[/] File {file_path} does not exist")
+        raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
         console.print(f"[bold red]Error:[/] File {file_path} does not exist")
         raise typer.Exit(code=1)
     
@@ -354,7 +402,8 @@ def analyze(
             extract_images=not no_images,
             advanced_tables=advanced_tables,
             analyze_elements=not no_element_analysis,
-            timeout=timeout
+            timeout_seconds=timeout,
+            memory_limit_fraction=mem_limit,
         )
     except KeyboardInterrupt:
         console.print("\n[bold yellow]Analysis interrupted by user[/]")
@@ -375,11 +424,18 @@ def batch(
     json: bool = typer.Option(True, "--json/--no-json", help="Save analysis to JSON files"),
     html: bool = typer.Option(False, "--html/--no-html", help="Save analysis to HTML reports"),
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit number of files to process"),
+    timeout: int = typer.Option(60, "--timeout", help="Processing timeout per file in seconds"), # Shorter timeout for batch
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit per file as fraction of available memory (0.1-1.0)"),
     summarize: bool = typer.Option(True, "--summarize/--no-summarize", help="Create a summary report"),
 ):
     """Batch analyze multiple documents."""
     # Validate directory exists
     if not directory.exists() or not directory.is_dir():
+        console.print(f"[bold red]Error:[/] Directory {directory} does not exist")
+        raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
         console.print(f"[bold red]Error:[/] Directory {directory} does not exist")
         raise typer.Exit(code=1)
     
@@ -433,7 +489,8 @@ def batch(
                 extract_images=True,
                 advanced_tables=False,
                 analyze_elements=False,  # Skip element analysis for batch processing
-                timeout=60
+                timeout_seconds=timeout, # Pass timeout
+                memory_limit_fraction=mem_limit, # Pass mem limit
             )
             
             if result:

@@ -1,6 +1,7 @@
 """Enhanced example of using Hugging Face transformers for document analysis."""
 
 import json
+import os # Added for psutil
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union, Set
@@ -8,11 +9,13 @@ from typing import Dict, List, Optional, Tuple, Any, Union, Set
 import typer
 from mmrag.document_processing import PDFProcessor
 from rich.console import Console
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn
 from rich.table import Table
 from rich.markdown import Markdown
-
+import psutil # Added for memory monitoring
+ 
 app = typer.Typer(help="Document analysis using Hugging Face transformers.")
 console = Console()
 
@@ -41,6 +44,8 @@ def analyze_with_huggingface(
     cache_models: bool = True,
     device: Optional[str] = None,
     show_timing: bool = False,
+    timeout_seconds: int = 120, # Added timeout
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
 ) -> Dict[str, Any]:
     """Analyze a document using Hugging Face transformers.
     
@@ -55,6 +60,8 @@ def analyze_with_huggingface(
         cache_models: Whether to cache models in the Hugging Face cache
         device: Device to use for inference (cpu, cuda, mps, or None for auto)
         show_timing: Whether to show timing information
+        timeout_seconds: Maximum processing time in seconds.
+        memory_limit_fraction: Maximum fraction of available memory to use.
         
     Returns:
         Dictionary with analysis results
@@ -74,6 +81,13 @@ def analyze_with_huggingface(
         console.print("Make sure you have PyTorch installed as well: pip install torch")
         raise typer.Exit(code=1)
     
+    # Resource monitoring setup
+    start_analysis_time = time.time()
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    console.print(f"Resource limits: Timeout={timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
     # Determine device if not specified
     if not device:
         if torch.cuda.is_available():
@@ -94,6 +108,16 @@ def analyze_with_huggingface(
         ) as progress:
             task = progress.add_task(f"Processing document: {file_path.name}", total=None)
             
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_analysis_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Processing exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
             processor = PDFProcessor(
                 extract_tables=True,
                 extract_images=True
@@ -222,6 +246,16 @@ def analyze_with_huggingface(
                 console=console
             ) as progress:
                 task = progress.add_task("Generating...", total=None)
+
+                # --- Resource Checks ---
+                elapsed_time = time.time() - start_analysis_time
+                if elapsed_time > timeout_seconds:
+                    raise ProcessingTimeoutError(f"Summarization exceeded {timeout_seconds} seconds limit.")
+                    
+                current_rss = process.memory_info().rss
+                if current_rss > memory_limit_bytes:
+                    raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before summarization exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                # --- End Resource Checks ---
                 
                 start_time = time.time()
                 summary = models["summarizer"](
@@ -266,6 +300,16 @@ def analyze_with_huggingface(
                 console=console
             ) as progress:
                 task = progress.add_task("Classifying...", total=None)
+
+                # --- Resource Checks ---
+                elapsed_time = time.time() - start_analysis_time
+                if elapsed_time > timeout_seconds:
+                    raise ProcessingTimeoutError(f"Classification exceeded {timeout_seconds} seconds limit.")
+                    
+                current_rss = process.memory_info().rss
+                if current_rss > memory_limit_bytes:
+                    raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before classification exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                # --- End Resource Checks ---
                 
                 start_time = time.time()
                 classification = models["zero_shot"](
@@ -329,6 +373,16 @@ def analyze_with_huggingface(
                     console=console
                 ) as progress:
                     task = progress.add_task("Answering...", total=None)
+
+                    # --- Resource Checks ---
+                    elapsed_time = time.time() - start_analysis_time
+                    if elapsed_time > timeout_seconds:
+                        raise ProcessingTimeoutError(f"Q&A exceeded {timeout_seconds} seconds limit.")
+                        
+                    current_rss = process.memory_info().rss
+                    if current_rss > memory_limit_bytes:
+                        raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before Q&A exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                    # --- End Resource Checks ---
                     
                     start_time = time.time()
                     answer = models["qa"](
@@ -404,15 +458,25 @@ def analyze_with_huggingface(
             console.print(f"[bold red]Error saving output:[/] {e}")
     
     # Interactive Q&A mode
-    if interactive_qa and qa and "qa" in models:
-        run_interactive_qa(models["qa"], context, file_path.name)
-    
+    if interactive_qa and qa and "qa" in models: # Pass limits to interactive mode
+        # --- Fix: Pass timeout and memory limit to interactive mode ---
+        run_interactive_qa(
+            models["qa"], context, file_path.name, 
+            timeout_seconds=timeout_seconds, # Pass timeout
+            memory_limit_fraction=memory_limit_fraction # Pass mem limit
+        )
     return results
 
 
-def run_interactive_qa(qa_model: Any, context: str, filename: str) -> None:
-    """Run interactive question answering session.
-    
+def run_interactive_qa(
+    qa_model: Any, 
+    context: str, 
+    filename: str,
+    timeout_seconds: int = 30, # Added timeout
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
+    # --- End Fix ---
+) -> None:
+    """
     Args:
         qa_model: The question answering pipeline
         context: Document text to use as context
@@ -425,6 +489,12 @@ def run_interactive_qa(qa_model: Any, context: str, filename: str) -> None:
         border_style="blue"
     ))
     
+    # Resource monitoring setup for interactive mode
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    start_interactive_time = time.time() # Track start time for overall timeout
+
     while True:
         try:
             question = console.input("\n[bold cyan]Question:[/] ")
@@ -437,6 +507,16 @@ def run_interactive_qa(qa_model: Any, context: str, filename: str) -> None:
                 console=console
             ) as progress:
                 task = progress.add_task("Generating answer...", total=None)
+
+                # --- Resource Checks ---
+                elapsed_time = time.time() - start_interactive_time
+                if elapsed_time > timeout_seconds:
+                    raise ProcessingTimeoutError(f"Interactive Q&A exceeded {timeout_seconds} seconds limit.")
+                    
+                current_rss = process.memory_info().rss
+                if current_rss > memory_limit_bytes:
+                    raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) during Q&A exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                # --- End Resource Checks ---
                 
                 start_time = time.time()
                 answer = qa_model(question=question, context=context)
@@ -650,10 +730,17 @@ def analyze(
     no_cache: bool = typer.Option(False, "--no-cache", help="Disable model caching"),
     device: Optional[str] = typer.Option(None, "--device", help="Device to use (cpu, cuda, mps)"),
     timing: bool = typer.Option(False, "--timing", "-t", help="Show timing information"),
+    timeout: int = typer.Option(120, "--timeout", help="Processing timeout in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Analyze a document using Hugging Face transformers."""
     # Validate file exists
     if not file_path.exists():
+        console.print(f"[bold red]Error:[/] File {file_path} does not exist")
+        raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
         console.print(f"[bold red]Error:[/] File {file_path} does not exist")
         raise typer.Exit(code=1)
     
@@ -681,6 +768,8 @@ def analyze(
             cache_models=not no_cache,
             device=device,
             show_timing=timing,
+            timeout_seconds=timeout,
+            memory_limit_fraction=mem_limit,
         )
     except KeyboardInterrupt:
         console.print("\n[bold yellow]Analysis interrupted by user[/]")
@@ -697,9 +786,16 @@ def batch(
     output: str = typer.Option("json", "--output", "-o", help="Output format (json, html, md, none)"),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-d", help="Directory for output files"),
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit number of files to process"),
+    timeout: int = typer.Option(60, "--timeout", help="Processing timeout per file in seconds"), # Shorter timeout for batch
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit per file as fraction of available memory (0.1-1.0)"),
     device: Optional[str] = typer.Option(None, "--device", help="Device to use (cpu, cuda, mps)"),
 ):
     """Batch analyze multiple documents using Hugging Face transformers."""
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
+
     # Validate directory exists
     if not directory.exists() or not directory.is_dir():
         console.print(f"[bold red]Error:[/] Directory {directory} does not exist")
@@ -764,6 +860,8 @@ def batch(
                 output_dir=file_output_dir,
                 interactive_qa=False,
                 device=device,
+                timeout_seconds=timeout, # Pass timeout
+                memory_limit_fraction=mem_limit, # Pass mem limit
             )
             
             # Add to results

@@ -1,18 +1,21 @@
 """Enhanced example of integrating Ollama for local LLM analysis."""
 
 import json
+import os # Added for psutil
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union
 
 import typer
 import httpx
-from mmrag.document_processing import PDFProcessor
+from mmrag.document_processing.factory import get_processor # Import the factory
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from mmrag.llm import OllamaClient, ContentUnderstanding
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+import psutil # Added for memory monitoring
 from rich.markdown import Markdown
 
 app = typer.Typer(help="Analyze documents with local LLMs via Ollama.")
@@ -65,7 +68,8 @@ async def analyze_with_ollama_async(
     analysis_types: List[str] = ["document", "elements", "entities"],
     temperature: float = 0.3,
     output_format: Optional[str] = None,
-    timeout: int = 60
+    timeout_seconds: int = 60, # Renamed from timeout
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
 ) -> Tuple[bool, Dict[str, Any]]:
     """Process a document and analyze it with a local Ollama model asynchronously.
     
@@ -75,11 +79,19 @@ async def analyze_with_ollama_async(
         analysis_types: Types of analysis to perform
         temperature: Temperature for the LLM
         output_format: Output format (json or md)
-        timeout: Timeout for LLM requests in seconds
+        timeout_seconds: Maximum processing time in seconds.
+        memory_limit_fraction: Maximum fraction of available memory to use.
         
     Returns:
         Tuple of (success, results)
     """
+    # Resource monitoring setup
+    start_analysis_time = time.time()
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    console.print(f"Resource limits: Timeout={timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
     # Test Ollama connection first
     with Progress(
         SpinnerColumn(),
@@ -109,7 +121,19 @@ async def analyze_with_ollama_async(
         ) as progress:
             task = progress.add_task(f"Processing document: {file_path.name}", total=None)
             
-            processor = PDFProcessor(
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_analysis_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Processing exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
+            # Use the factory to get the correct processor
+            processor = get_processor(
+                file_path,
                 extract_tables=True,
                 extract_images=True,
                 enable_llm_analysis=False,  # We'll do this manually
@@ -140,7 +164,7 @@ async def analyze_with_ollama_async(
     
     # Set up content analyzer with Ollama
     client = OllamaClient(model=model_name)
-    client.timeout = timeout
+    client.timeout = timeout_seconds # Use timeout_seconds
     analyzer = ContentUnderstanding(llm_client=client)
     
     # Configure analysis options based on the requested types
@@ -157,6 +181,16 @@ async def analyze_with_ollama_async(
         ) as progress:
             task = progress.add_task("Analyzing document content with LLM...", total=None)
             
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_analysis_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Analysis exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before LLM analysis exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
             try:
                 # Start timer for performance tracking
                 start_time = time.time()
@@ -201,6 +235,16 @@ async def analyze_with_ollama_async(
                 progress.update(task, description=f"Analyzing {element_type} element...")
                 
                 try:
+                    # --- Resource Checks ---
+                    elapsed_time = time.time() - start_analysis_time
+                    if elapsed_time > timeout_seconds:
+                        raise ProcessingTimeoutError(f"Element analysis exceeded {timeout_seconds} seconds limit.")
+                        
+                    current_rss = process.memory_info().rss
+                    if current_rss > memory_limit_bytes:
+                        raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) during element analysis exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                    # --- End Resource Checks ---
+
                     # Analyze element
                     element_analysis = analyzer.analyze_element(element)
                     
@@ -227,6 +271,16 @@ async def analyze_with_ollama_async(
         ) as progress:
             task = progress.add_task("Extracting entities...", total=None)
             
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_analysis_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Entity extraction exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) before entity extraction exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
             try:
                 # Start timer for performance tracking
                 start_time = time.time()
@@ -309,7 +363,8 @@ def analyze_with_ollama(
     analysis_types: List[str] = ["document", "elements", "entities"],
     temperature: float = 0.3,
     output_format: Optional[str] = None,
-    timeout: int = 60
+    timeout_seconds: int = 60, # Renamed from timeout
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
 ) -> Dict[str, Any]:
     """Process a document and analyze it with a local Ollama model (synchronous version).
     
@@ -319,84 +374,39 @@ def analyze_with_ollama(
         analysis_types: Types of analysis to perform
         temperature: Temperature for the LLM
         output_format: Output format (json or md)
-        timeout: Timeout for LLM requests in seconds
+        timeout_seconds: Maximum processing time in seconds.
+        memory_limit_fraction: Maximum fraction of available memory to use.
         
     Returns:
         Results dictionary
     """
     # For synchronous version, we'll use asyncio.run
     import asyncio
-    
-    # Check if running in an event loop already
+
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            console.print("[yellow]Warning: Running in existing event loop, some async features may not work properly[/]")
-            # Use the synchronous OllamaClient methods
-            # This is a simplified implementation that doesn't mirror the async version exactly
-            
-            # Test Ollama connection
-            client = OllamaClient(model=model_name)
-            client.timeout = timeout
-            
-            try:
-                test_response = client.generate_sync("Hello, are you working?", max_tokens=20)
-                console.print(f"[bold green]Ollama connection successful[/] - Model: {model_name}")
-            except Exception as e:
-                console.print(f"[bold red]Error connecting to Ollama:[/] {e}")
-                console.print("Make sure Ollama is installed and running, and the model is available.")
-                return {"error": str(e)}
-            
-            # Process the document
-            try:
-                processor = PDFProcessor(
-                    extract_tables=True,
-                    extract_images=True,
-                    enable_llm_analysis=False,
-                )
-                document = processor.process(file_path)
-            except Exception as e:
-                console.print(f"[bold red]Error processing document:[/] {e}")
-                return {"error": str(e)}
-            
-            # Set up content analyzer
-            analyzer = ContentUnderstanding(llm_client=client)
-            
-            # Analyze document
-            results = {
-                "document_id": document.document_id,
-                "filename": document.filename,
-                "elements_count": len(document.elements),
-                "analysis": {}
-            }
-            
-            if "document" in analysis_types:
-                analysis = analyzer.analyze_document(document)
-                results["analysis"]["document"] = analysis
-            
-            return results
-        else:
-            # We can use asyncio.run
-            success, results = asyncio.run(analyze_with_ollama_async(
+        # Use asyncio.run to handle the event loop automatically
+        success, results = asyncio.run(
+            analyze_with_ollama_async(
                 file_path,
                 model_name,
                 analysis_types,
                 temperature,
                 output_format,
-                timeout
+                timeout_seconds, # Pass timeout
+                memory_limit_fraction, # Pass mem limit
             ))
-            return results
-    except RuntimeError:
-        # No event loop, we can use asyncio.run
-        success, results = asyncio.run(analyze_with_ollama_async(
-            file_path,
-            model_name,
-            analysis_types,
-            temperature,
-            output_format,
-            timeout
-        ))
+        # If analyze_with_ollama_async returns False, results might contain an error message
+        if not success:
+            console.print(f"[bold red]Analysis failed:[/] {results.get('error', 'Unknown error')}")
+            # Optionally re-raise or handle the error differently
+
         return results
+    except Exception as e:
+        # Catch any exception during the async run
+        console.print(f"[bold red]Error during synchronous analysis execution:[/] {e}")
+        import traceback
+        console.print(traceback.format_exc())
+        return {"error": f"Synchronous execution failed: {str(e)}"}
 
 
 def display_analysis_results(results: Dict[str, Any]) -> None:
@@ -490,6 +500,7 @@ def analyze(
         help="Types of analysis to perform"
     ),
     temperature: float = typer.Option(0.3, "--temperature", help="Temperature for the LLM"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Analyze a document with Ollama LLM."""
     # Validate file exists
@@ -506,6 +517,11 @@ def analyze(
     # Validate temperature
     if temperature < 0 or temperature > 1:
         console.print(f"[bold red]Error:[/] Temperature must be between 0 and 1")
+        raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
         raise typer.Exit(code=1)
     
     # Validate analysis types
@@ -526,7 +542,8 @@ def analyze(
             analysis_types=analysis_type,
             temperature=temperature,
             output_format=output,
-            timeout=timeout
+            timeout_seconds=timeout, # Pass timeout
+            memory_limit_fraction=mem_limit, # Pass mem limit
         )
         
         # Display results
@@ -549,12 +566,20 @@ def batch(
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Output directory"),
     format: str = typer.Option("json", "--format", "-f", help="Output format (json or md)"),
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit number of files to process"),
+    timeout: int = typer.Option(60, "--timeout", help="Processing timeout per file in seconds"), # Shorter timeout for batch
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit per file as fraction of available memory (0.1-1.0)"),
 ):
     """Batch analyze multiple documents with Ollama LLM."""
     # Validate directory exists
     if not directory.exists() or not directory.is_dir():
         console.print(f"[bold red]Error:[/] Directory {directory} does not exist")
         raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        if not directory.exists() or not directory.is_dir():
+            console.print(f"[bold red]Error:[/] Directory {directory} does not exist")
+            raise typer.Exit(code=1)
     
     # Find matching files
     files = list(directory.glob(pattern))
@@ -590,7 +615,9 @@ def batch(
                 file_path,
                 model_name=model,
                 output_format=format if output_dir else None,
-                analysis_types=["document"]  # Simplified analysis for batch processing
+                analysis_types=["document"],  # Simplified analysis for batch processing
+                timeout_seconds=timeout, # Pass timeout
+                memory_limit_fraction=mem_limit, # Pass mem limit
             )
             
             # Save results if output directory is specified but not already saved

@@ -1,6 +1,7 @@
 """Example demonstrating caching optimizations for improved performance."""
 
 import time
+import os # Added for psutil
 import tempfile
 from functools import lru_cache
 from pathlib import Path
@@ -8,12 +9,14 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import typer
 from mmrag.document_processing import PDFProcessor
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from mmrag.document_processing.cache import CachedDocumentProcessor
 from mmrag.vectordb import ChromaStore
 from mmrag.vectordb.cache import EmbeddingCache
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+import psutil # Added for memory monitoring
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 app = typer.Typer(help="Benchmark caching optimizations.")
@@ -29,12 +32,26 @@ def cached_benchmark_function(data_key: str) -> Dict:
     return {"key": data_key, "processed": True}
 
 
-def benchmark_caching(file_path: Path, iterations: int = 3, clear_cache: bool = False):
+def benchmark_caching(
+    file_path: Path, 
+    iterations: int = 3, 
+    clear_cache: bool = False,
+    timeout_seconds: int = 60, # Added timeout
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
+):
     """Benchmark processing with and without caching."""
     # Create processors
     standard_processor = PDFProcessor(extract_tables=True, extract_images=True)
     cached_processor = CachedDocumentProcessor(PDFProcessor(extract_tables=True, extract_images=True))
     
+    # Resource monitoring setup
+    start_benchmark_time = time.time()
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    console.print(f"Resource limits: Timeout={timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
+
     console.print(Panel(f"Benchmarking caching with: [bold blue]{file_path.name}[/]"))
     
     # Create result table
@@ -56,6 +73,15 @@ def benchmark_caching(file_path: Path, iterations: int = 3, clear_cache: bool = 
             console=console,
         ) as progress:
             # Standard processing
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_benchmark_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Benchmarking exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
             task = progress.add_task("Running standard processor...", total=None)
             start_time = time.time()
             standard_doc = standard_processor.process(file_path)
@@ -63,6 +89,15 @@ def benchmark_caching(file_path: Path, iterations: int = 3, clear_cache: bool = 
             progress.update(task, completed=True)
             
             # Cached processing
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_benchmark_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Benchmarking exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
             task = progress.add_task("Running cached processor...", total=None)
             start_time = time.time()
             cached_doc = cached_processor.process(str(file_path))  # Cache key must be hashable (string)
@@ -130,6 +165,15 @@ def benchmark_caching(file_path: Path, iterations: int = 3, clear_cache: bool = 
                     console=console,
                 ) as progress:
                     # Standard query
+                    # --- Resource Checks ---
+                    elapsed_time = time.time() - start_benchmark_time
+                    if elapsed_time > timeout_seconds:
+                        raise ProcessingTimeoutError(f"Benchmarking exceeded {timeout_seconds} seconds limit.")
+                        
+                    current_rss = process.memory_info().rss
+                    if current_rss > memory_limit_bytes:
+                        raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                    # --- End Resource Checks ---
                     task = progress.add_task("Running standard query...", total=None)
                     start_time = time.time()
                     standard_results = standard_store.query(query, n_results=3)
@@ -137,6 +181,15 @@ def benchmark_caching(file_path: Path, iterations: int = 3, clear_cache: bool = 
                     progress.update(task, completed=True)
                     
                     # Cached query
+                    # --- Resource Checks ---
+                    elapsed_time = time.time() - start_benchmark_time
+                    if elapsed_time > timeout_seconds:
+                        raise ProcessingTimeoutError(f"Benchmarking exceeded {timeout_seconds} seconds limit.")
+                        
+                    current_rss = process.memory_info().rss
+                    if current_rss > memory_limit_bytes:
+                        raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                    # --- End Resource Checks ---
                     task = progress.add_task("Running cached query...", total=None)
                     start_time = time.time()
                     cached_results = cached_store.query(query, n_results=3)
@@ -225,6 +278,8 @@ def run(
     file_path: Path = typer.Argument(..., help="Path to the document file"),
     iterations: int = typer.Option(3, "--iterations", "-i", help="Number of iterations for benchmarking"),
     clear_cache: bool = typer.Option(False, "--clear-cache", help="Clear cache before benchmarking"),
+    timeout: int = typer.Option(60, "--timeout", help="Processing timeout in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Run the caching benchmark."""
     if not file_path.exists():
@@ -235,7 +290,17 @@ def run(
         console.print(f"[bold red]Error:[/] File {file_path} is not a PDF")
         raise typer.Exit(code=1)
     
-    benchmark_caching(file_path, iterations, clear_cache)
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
+
+    benchmark_caching(
+        file_path, 
+        iterations, 
+        clear_cache,
+        timeout_seconds=timeout,
+        memory_limit_fraction=mem_limit)
 
 
 if __name__ == "__main__":

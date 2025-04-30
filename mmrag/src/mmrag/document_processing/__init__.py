@@ -1,12 +1,17 @@
 from mmrag.document_processing.base import (
     BoundingBox,
     ChartElement,
+    DocumentProcessor, # Added base processor class
     DocumentElement,
     DocumentProcessor,
     ImageElement,
     ProcessedDocument,
     TableElement,
     TextElement,
+)
+# Import exceptions relevant to processing
+from mmrag.exceptions import (
+    ProcessingError, ProcessingTimeoutError, MemoryLimitExceededError
 )
 
 from mmrag.document_processing.advanced_table import CascadeTabNetDetector # Advanced table detection
@@ -17,11 +22,10 @@ from mmrag.document_processing.pdf import PDFProcessor
 from mmrag.document_processing.ppt import PowerPointProcessor
 from mmrag.document_processing.table import TableDetector
 from mmrag.document_processing.visual import VisualElementProcessor
-from mmrag.document_processing.base import BoundingBox, DocumentElement, ProcessedDocument
 
 
 __all__ = [
-    # Base
+    # --- Base Classes & Elements ---
     "BoundingBox",
     "ChartElement",
     "DocumentElement",
@@ -30,15 +34,22 @@ __all__ = [
     "ProcessedDocument",
     "TableDetector",
     "TableElement",
-    "TextElement",
-    # Processors
+    "TextElement", 
+    
+    # --- Main Processors ---
     "PDFProcessor",
     "PowerPointProcessor",
-    # Detection/Analysis
+    
+    # --- Specialized Components (Potentially for advanced use/extension) ---
+    "TableDetector", # Basic heuristic detector
     "CascadeTabNetDetector",
     "EnhancedVisualProcessor",
     "VisualElementProcessor",
-    # Utilities
+    
+    # --- Utilities & Factory ---
     "CachedDocumentProcessor",
     "get_processor",
+    
+    # --- Exceptions ---
+    "ProcessingError", "ProcessingTimeoutError", "MemoryLimitExceededError",
 ]

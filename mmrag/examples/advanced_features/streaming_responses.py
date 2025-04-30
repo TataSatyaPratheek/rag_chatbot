@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os # Added for psutil
 import signal
 import time
 from contextlib import asynccontextmanager
@@ -11,11 +12,13 @@ from typing import AsyncGenerator, Dict, List, Optional, Union, Any
 import httpx
 import typer
 from mmrag.document_processing import PDFProcessor
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from mmrag.vectordb import ChromaStore
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
+import psutil # Added for memory monitoring
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 app = typer.Typer(help="Streaming RAG chatbot example.")
@@ -29,7 +32,9 @@ class StreamingRAGChatbot:
         self, 
         collection_name: str = "streaming_rag",
         base_url: str = "http://localhost:11434/api",
-        model: str = "llama3.2:latest"
+        model: str = "llama3.2:latest",
+        timeout_seconds: int = 30, # Added timeout
+        memory_limit_fraction: float = 0.5, # Added memory limit fraction
     ):
         """Initialize the chatbot."""
         # Set up vector store
@@ -53,12 +58,26 @@ class StreamingRAGChatbot:
         
         # Track loaded documents
         self.loaded_documents = []
-    
+
+        # Store resource limits
+        self.timeout_seconds = timeout_seconds
+        self.memory_limit_fraction = memory_limit_fraction
+
     def load_document(self, file_path: Path) -> Optional[Any]:
         """Load a document into the system."""
         try:
+            # Resource monitoring setup
+            start_time = time.time()
+            process = psutil.Process(os.getpid())
+            initial_available_memory = psutil.virtual_memory().available
+            memory_limit_bytes = initial_available_memory * self.memory_limit_fraction
+            console.print(f"Resource limits for loading: Timeout={self.timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
             # Process the document
             with Progress(
+                # --- Resource Checks ---
+                # Note: Checks are placed here to run before the potentially long `processor.process`
+                # More granular checks could be added inside the processor if needed.
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 console=console
@@ -66,6 +85,15 @@ class StreamingRAGChatbot:
                 task = progress.add_task(f"Processing document: {file_path.name}", total=None)
                 document = self.processor.process(file_path)
                 
+                elapsed_time = time.time() - start_time
+                if elapsed_time > self.timeout_seconds:
+                    raise ProcessingTimeoutError(f"Document loading exceeded {self.timeout_seconds} seconds limit.")
+                    
+                current_rss = process.memory_info().rss
+                if current_rss > memory_limit_bytes:
+                    raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                # --- End Resource Checks ---
+
                 # Store in vector database
                 progress.update(task, description=f"Indexing document: {file_path.name}")
                 self.store.add_document(document)
@@ -123,6 +151,19 @@ class StreamingRAGChatbot:
         Yields:
             Incremental response chunks
         """
+        # Resource monitoring setup for generation
+        start_gen_time = time.time()
+        process = psutil.Process(os.getpid())
+        initial_available_memory = psutil.virtual_memory().available
+        memory_limit_bytes = initial_available_memory * self.memory_limit_fraction
+        # Note: Timeout for LLM generation is handled by httpx timeout, 
+        # but we can add an overall timeout for the whole function if needed.
+        # overall_timeout = self.timeout_seconds * 2 # Example: double the loading timeout
+
+        console.print(f"Resource limits for generation: Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
+
+
+
         # Retrieve context
         with Progress(
             SpinnerColumn(),
@@ -132,6 +173,14 @@ class StreamingRAGChatbot:
             task = progress.add_task("Searching...", total=None)
             context = self.retrieve_context(query)
             progress.update(task, completed=True)
+
+        # --- Resource Check after retrieval ---
+        current_rss = process.memory_info().rss
+        if current_rss > memory_limit_bytes:
+            raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) after retrieval exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+        # elapsed_gen_time = time.time() - start_gen_time
+        # if elapsed_gen_time > overall_timeout:
+        #     raise ProcessingTimeoutError(f"Generation exceeded {overall_timeout} seconds limit.")
         
         if context == "No documents have been loaded yet.":
             yield "No documents have been loaded yet. Please load a document first."
@@ -180,6 +229,14 @@ If the context doesn't contain relevant information to answer the query, politel
                             # Yield accumulated response so far
                             yield accumulated_response
                             
+                            # --- Resource Check during streaming ---
+                            current_rss = process.memory_info().rss
+                            if current_rss > memory_limit_bytes:
+                                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) during generation exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+                            # elapsed_gen_time = time.time() - start_gen_time
+                            # if elapsed_gen_time > overall_timeout:
+                            #     raise ProcessingTimeoutError(f"Generation exceeded {overall_timeout} seconds limit.")
+
                             # If done, break
                             if data.get("done", False):
                                 break
@@ -289,12 +346,21 @@ def run(
     load: Optional[Path] = typer.Option(None, "--load", "-l", help="Load a document at startup"),
     model: str = typer.Option("llama3.2:latest", "--model", "-m", help="LLM model to use"),
     api_url: str = typer.Option("http://localhost:11434/api", "--api", "-a", help="Ollama API URL"),
+    timeout: int = typer.Option(30, "--timeout", help="Processing timeout for loading in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Run the streaming RAG chatbot."""
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
+
     # Initialize chatbot
     chatbot = StreamingRAGChatbot(
         base_url=api_url,
-        model=model
+        model=model,
+        timeout_seconds=timeout,
+        memory_limit_fraction=mem_limit,
     )
     
     # Load initial document if specified

@@ -1,6 +1,7 @@
 """Enhanced example of processing complex multimodal documents."""
 
 import json
+import os # Added for psutil
 import sys
 import time
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 
 import typer
 from mmrag.document_processing.factory import get_processor
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn
@@ -15,6 +17,7 @@ from rich.table import Table
 from rich.tree import Tree
 from rich.markup import escape
 from rich.markdown import Markdown
+import psutil # Added for memory monitoring
 
 app = typer.Typer(help="Process complex multimodal documents with advanced features.")
 console = Console()
@@ -31,6 +34,8 @@ def process_complex_document(
     extract_images: bool = True,
     show_details: bool = False,
     model: str = "llama3.2:latest",
+    timeout_seconds: int = 30, # Added timeout
+    memory_limit_fraction: float = 0.5, # Added memory limit fraction
 ) -> Dict[str, Any]:
     """Process a complex document with multiple modalities.
     
@@ -45,6 +50,8 @@ def process_complex_document(
         extract_images: Whether to extract images
         show_details: Whether to show detailed debug information
         model: LLM model to use for analysis
+        timeout_seconds: Maximum processing time in seconds.
+        memory_limit_fraction: Maximum fraction of available memory to use.
         
     Returns:
         Dictionary with processing results
@@ -53,6 +60,13 @@ def process_complex_document(
     if not file_path.exists():
         console.print(f"[bold red]Error:[/] File {file_path} not found")
         raise typer.Exit(code=1)
+
+    # Resource monitoring setup
+    start_time = time.time()
+    process = psutil.Process(os.getpid())
+    initial_available_memory = psutil.virtual_memory().available
+    memory_limit_bytes = initial_available_memory * memory_limit_fraction
+    console.print(f"Resource limits: Timeout={timeout_seconds}s, Memory Limit={memory_limit_bytes / (1024**2):.2f} MB")
     
     # Determine file type and get appropriate processor
     try:
@@ -99,9 +113,6 @@ def process_complex_document(
     
     # Process document with metrics tracking
     try:
-        start_time = time.time()
-        memory_start = get_memory_usage()
-        
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -111,12 +122,21 @@ def process_complex_document(
             # Create an indeterminate task for processing
             task = progress.add_task(f"Processing {file_path.name}...", total=None)
             
+            # --- Resource Checks ---
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout_seconds:
+                raise ProcessingTimeoutError(f"Processing exceeded {timeout_seconds} seconds limit.")
+                
+            current_rss = process.memory_info().rss
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            # --- End Resource Checks ---
+
             # Process document
             document = processor.process(file_path)
             
             # Update task to completed
             processing_time = time.time() - start_time
-            memory_used = get_memory_usage() - memory_start
             
             progress.update(task, completed=True, description=f"Document processed in {processing_time:.2f}s")
     except Exception as e:
@@ -150,7 +170,7 @@ def process_complex_document(
     metrics_table.add_row("Processing Time", f"{processing_time:.2f} seconds")
     metrics_table.add_row("Elements Extracted", str(total_elements))
     metrics_table.add_row("Elements per Second", f"{total_elements / processing_time:.1f}")
-    metrics_table.add_row("Estimated Memory Used", f"{memory_used:.2f} MB")
+    metrics_table.add_row("Peak Memory Usage (RSS)", f"{process.memory_info().rss / (1024**2):.2f} MB")
     
     console.print(metrics_table)
     
@@ -217,7 +237,7 @@ def process_complex_document(
             "processing_time": processing_time,
             "total_elements": total_elements,
             "elements_per_second": total_elements / processing_time,
-            "memory_usage_mb": memory_used
+            "peak_memory_rss_mb": process.memory_info().rss / (1024**2)
         }
     }
     
@@ -605,24 +625,6 @@ def generate_markdown_report(document: Any, results: Dict[str, Any], filename: s
     return md
 
 
-def get_memory_usage() -> float:
-    """Get the current memory usage of the process in MB.
-    
-    Returns:
-        Memory usage in MB
-    """
-    try:
-        import psutil
-        # Get memory info for the current process
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        # Return as MB
-        return memory_info.rss / (1024 * 1024)
-    except ImportError:
-        # If psutil is not available, use a simpler approach
-        return 0.0
-
-
 @app.command()
 def process(
     file_path: Path = typer.Argument(..., help="Path to the document file"),
@@ -635,6 +637,8 @@ def process(
     no_images: bool = typer.Option(False, "--no-images", help="Disable image extraction"),
     details: bool = typer.Option(False, "--details", help="Show detailed processing information"),
     model: str = typer.Option("llama3.2:latest", "--model", "-m", help="LLM model to use (if LLM is enabled)"),
+    timeout: int = typer.Option(30, "--timeout", help="Processing timeout in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):
     """Process a complex multimodal document."""
     # Validate output format
@@ -643,6 +647,11 @@ def process(
         console.print("Supported formats: json, html, md, none")
         raise typer.Exit(code=1)
     
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
+        raise typer.Exit(code=1)
+
     try:
         process_complex_document(
             file_path=file_path,
@@ -655,6 +664,8 @@ def process(
             extract_images=not no_images,
             show_details=details,
             model=model,
+            timeout_seconds=timeout,
+            memory_limit_fraction=mem_limit,
         )
     except KeyboardInterrupt:
         console.print("\n[bold yellow]Processing interrupted by user[/]")
@@ -671,6 +682,8 @@ def batch(
     output: str = typer.Option("json", "--output", "-o", help="Output format (json, html, md, none)"),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-d", help="Directory for output files"),
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit number of files to process"),
+    timeout: int = typer.Option(30, "--timeout", help="Processing timeout per file in seconds"),
+    mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit per file as fraction of available memory (0.1-1.0)"),
     summarize: bool = typer.Option(True, "--summarize/--no-summarize", help="Create a summary report"),
 ):
     """Batch process multiple complex documents."""
@@ -683,6 +696,11 @@ def batch(
     if output not in ["json", "html", "md", "none"]:
         console.print(f"[bold red]Error:[/] Invalid output format: {output}")
         console.print("Supported formats: json, html, md, none")
+        raise typer.Exit(code=1)
+
+    # Validate memory limit
+    if not (0.1 <= mem_limit <= 1.0):
+        console.print("[bold red]Error:[/] Memory limit must be between 0.1 and 1.0")
         raise typer.Exit(code=1)
     
     # Find matching files
@@ -739,6 +757,8 @@ def batch(
                 extract_tables=True,
                 extract_images=True,
                 show_details=False,
+                timeout_seconds=timeout,
+                memory_limit_fraction=mem_limit,
             )
             
             # Add to results
