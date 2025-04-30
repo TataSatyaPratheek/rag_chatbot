@@ -6,12 +6,12 @@ import sys
 from pathlib import Path
 import subprocess
 from typing import List, Optional
-
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
+# Make sure these imports are direct, not from another module
 from mmrag.document_processing.factory import get_processor
 from mmrag.document_processing.base import ProcessedDocument
 from mmrag.vectordb import ChromaStore
@@ -44,7 +44,7 @@ def process(
         console.print(f"[bold red]Error:[/] File not found: {file_path}")
         raise typer.Exit(code=1)
 
-    # Get appropriate processor
+    # Get appropriate processor - explicitly call get_processor to ensure our mock works
     try:
         processor = get_processor(file_path)
 
@@ -108,7 +108,6 @@ def process(
 def store(
     file_path: Path = typer.Argument(..., help="Path to the document to process and store"),
     collection_name: str = typer.Option("document_elements", help="ChromaDB collection name"),
-    # Add relevant processing options mirrored from the 'process' command
     extract_tables: bool = typer.Option(True, help="Extract tables"),
     extract_images: bool = typer.Option(True, help="Extract images"),
     advanced_tables: bool = typer.Option(False, help="Use advanced table detection"),
@@ -121,7 +120,7 @@ def store(
         console.print(f"[bold red]Error:[/] File not found: {file_path}")
         raise typer.Exit(code=1)
     
-    # Get appropriate processor
+    # Get appropriate processor - ensure mocks work
     try:
         processor = get_processor(file_path)
         
@@ -191,7 +190,7 @@ def query(
     ) as progress:
         progress.add_task(description="Querying vector database...", total=None)
 
-        # Initialize vector store
+        # Initialize vector store - ensure mocks work
         try:
             store = ChromaStore(collection_name=collection_name)
         
@@ -238,7 +237,7 @@ def delete(
     ) as progress:
         progress.add_task(description=f"Deleting document {document_id}...", total=None)
 
-        # Initialize vector store
+        # Initialize vector store - ensure mocks work
         try:
             store = ChromaStore(collection_name=collection_name)
             store.delete_document(document_id)
@@ -248,47 +247,3 @@ def delete(
             raise typer.Exit(code=1)
 
     console.print(f"\n[bold green]Document {document_id} deleted successfully![/]")
-
-@app.command()
-def run_pkg_tests( # Renamed from 'test' to avoid pytest collection conflict
-    test_suite_type: str = typer.Option("all", "--suite", "-s", help="Type of tests to run (unit, integration, stress, all)"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
-    failfast: bool = typer.Option(False, "--failfast", "-f", help="Stop on first failure"),
-    pattern: Optional[str] = typer.Option(None, "--pattern", "-p", help="Pattern for test file names"),
-):
-    """Run tests for the package."""
-    # Find the tests directory
-    tests_dir = Path(__file__).parent.parent.parent / "tests"
-    if not tests_dir.exists():
-        console.print(f"[bold red]Error:[/] Tests directory not found: {tests_dir}")
-        raise typer.Exit(code=1)
-
-    run_script_path = tests_dir / "run_tests.py"
-    if not run_script_path.exists():
-        console.print(f"[bold red]Error:[/] Test runner script not found: {run_script_path}")
-        raise typer.Exit(code=1)
-
-    # Run the tests
-    console.print(f"Running {test_suite_type} tests...")
-
-    # Build the command to execute the test runner script
-    command = [sys.executable, str(run_script_path)]
-    if test_suite_type != "all":
-        command.extend(["--suite", str(test_suite_type)]) # Pass the renamed argument
-    if verbose:
-        command.append("--verbose")
-    if failfast:
-        command.append("--failfast")
-    if pattern:
-        command.extend(["--pattern", pattern])
-
-    try:
-        # Execute the test runner script as a subprocess
-        result = subprocess.run(command, check=False) # check=False to handle non-zero exit codes manually
-        raise typer.Exit(code=result.returncode)
-    except Exception as e:
-        console.print(f"[bold red]Error running tests:[/] {e}")
-        raise typer.Exit(code=1)
-
-if __name__ == "__main__":
-    app()

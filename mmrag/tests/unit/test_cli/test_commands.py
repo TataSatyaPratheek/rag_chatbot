@@ -10,7 +10,7 @@ from mmrag.document_processing.base import ProcessedDocument, TextElement, Bound
 class TestCLICommands:
     """Test suite for CLI commands."""
     
-    @patch("mmrag.document_processing.factory.get_processor")
+    @patch("mmrag.cli.get_processor")  # Change the patch to match the actual import location
     def test_process_command(self, mock_get_processor, sample_pdf_path, temp_dir):
         """Test document processing command."""
         # Mock processor
@@ -50,8 +50,8 @@ class TestCLICommands:
             # Verify command ran successfully
             assert result.exit_code == 0
     
-    @patch("mmrag.document_processing.factory.get_processor")
-    @patch("mmrag.vectordb.ChromaStore")
+    @patch("mmrag.cli.get_processor")  # Changed to match the actual import
+    @patch("mmrag.cli.ChromaStore")     # Changed to match the actual import
     def test_store_command(self, mock_chroma, mock_get_processor, sample_pdf_path):
         """Test document storing command."""
         # Mock processor and document
@@ -85,7 +85,7 @@ class TestCLICommands:
             
             assert result.exit_code == 0
     
-    @patch("mmrag.vectordb.ChromaStore")
+    @patch("mmrag.cli.ChromaStore")  # Changed to match the actual import
     def test_query_command(self, mock_chroma):
         """Test query command."""
         # Mock ChromaStore and query results
@@ -94,8 +94,8 @@ class TestCLICommands:
             "ids": [["doc1_text1", "doc2_text1"]],
             "documents": [["Text from doc 1", "Text from doc 2"]],
             "metadatas": [[
-                {"document_id": "doc1", "element_id": "text1", "filename": "doc1.pdf", "page": 0},
-                {"document_id": "doc2", "element_id": "text1", "filename": "doc2.pdf", "page": 0}
+                {"document_id": "doc1", "element_id": "text1", "filename": "doc1.pdf", "page": 0, "element_type": "text"},
+                {"document_id": "doc2", "element_id": "text1", "filename": "doc2.pdf", "page": 0, "element_type": "text"}
             ]],
             "distances": [[0.1, 0.2]]
         }
@@ -116,7 +116,7 @@ class TestCLICommands:
             
             assert result.exit_code == 0
         
-    @patch("mmrag.vectordb.ChromaStore")
+    @patch("mmrag.cli.ChromaStore")  # Changed to match the actual import
     def test_delete_command(self, mock_chroma):
         """Test delete command."""
         # Mock ChromaStore

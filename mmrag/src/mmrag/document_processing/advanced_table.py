@@ -1,5 +1,4 @@
-# src/mmrag/document_processing/advanced_table.py
-"""Advanced table detection using deep learning models."""
+# Fixes for the advanced_table.py file
 
 import logging
 import os
@@ -12,14 +11,12 @@ import fitz
 import numpy as np
 import torch
 import torch.nn as nn
-from PIL import Image
+from PIL import Image, UnidentifiedImageError  # Added import for exception handling
 from torchvision.models.detection import maskrcnn_resnet50_fpn
-from torchvision.transforms.v2 import functional as F # Use v2 for consistency if available
-from torchvision.models.detection.faster_rcnn import FastRCNNPredictor # Import needed predictor
-from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor # Import needed predictor
-from torchvision.models.detection import MaskRCNN_ResNet50_FPN_Weights # Import weights enum
-
-
+from torchvision.transforms.v2 import functional as F
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
+from torchvision.models.detection import MaskRCNN_ResNet50_FPN_Weights
 
 from mmrag.document_processing.base import BoundingBox, TableElement
 
@@ -99,6 +96,7 @@ class CascadeTabNetDetector:
                 if not filtered_state_dict:
                     logger.warning(f"No matching keys found in state dict from {model_path}")
                 
+                # Added strict=False to handle mismatched keys
                 model.load_state_dict(filtered_state_dict, strict=False)
                 logger.info(f"Loaded model weights from {model_path}")
             except Exception as e:
@@ -130,115 +128,65 @@ class CascadeTabNetDetector:
         
         try:
             # Load image for processing
-            image = Image.open(img_path)
-            image_tensor = F.to_tensor(image).to(self.device)
-            
-            # Perform inference
-            with torch.no_grad():
-                prediction = self.model([image_tensor])[0]
-            
-            # Process predictions
-            table_elements = []
-            
-            # Filter predictions by score and class
-            keep = prediction['scores'] > 0.7
-            boxes = prediction['boxes'][keep].cpu().numpy()
-            labels = prediction['labels'][keep].cpu().numpy()
-            scores = prediction['scores'][keep].cpu().numpy()
-            
-            # Convert to table elements
-            for i, (box, label, score) in enumerate(zip(boxes, labels, scores)):
-                if label > 0:  # Not background
-                    class_name = self.classes[label]
-                    
-                    # Scale coordinates to page coordinates
-                    x0, y0, x1, y1 = box
-                    page_width, page_height = page.rect.width, page.rect.height
-                    scale_x = page_width / image.width
-                    scale_y = page_height / image.height
-                    
-                    page_x0 = x0 * scale_x
-                    page_y0 = y0 * scale_y
-                    page_x1 = x1 * scale_x
-                    page_y1 = y1 * scale_y
-                    
-                    # Extract table content
-                    table_content = self._extract_table_content(page, (page_x0, page_y0, page_x1, page_y1))
-                    
-                    table_element = TableElement(
-                        element_id=f"table-{page_idx}-{i}",
-                        content=table_content,
-                        bbox=BoundingBox(
-                            x0=page_x0,
-                            y0=page_y0,
-                            x1=page_x1,
-                            y1=page_y1,
-                            page=page_idx,
-                        ),
-                        metadata={
-                            "table_type": class_name,
-                            "confidence": float(score),
-                        },
-                    )
-                    table_elements.append(table_element)
-            
-            return table_elements
-            
+            try:
+                image = Image.open(img_path)
+                image_tensor = F.to_tensor(image).to(self.device)
+                
+                # Perform inference
+                with torch.no_grad():
+                    prediction = self.model([image_tensor])[0]
+                
+                # Process predictions
+                table_elements = []
+                
+                # Filter predictions by score and class
+                keep = prediction['scores'] > 0.7
+                boxes = prediction['boxes'][keep].cpu().numpy()
+                labels = prediction['labels'][keep].cpu().numpy()
+                scores = prediction['scores'][keep].cpu().numpy()
+                
+                # Convert to table elements
+                for i, (box, label, score) in enumerate(zip(boxes, labels, scores)):
+                    if label > 0:  # Not background
+                        class_name = self.classes[label]
+                        
+                        # Scale coordinates to page coordinates
+                        x0, y0, x1, y1 = box
+                        page_width, page_height = page.rect.width, page.rect.height
+                        scale_x = page_width / image.width
+                        scale_y = page_height / image.height
+                        
+                        page_x0 = x0 * scale_x
+                        page_y0 = y0 * scale_y
+                        page_x1 = x1 * scale_x
+                        page_y1 = y1 * scale_y
+                        
+                        # Extract table content
+                        table_content = self._extract_table_content(page, (page_x0, page_y0, page_x1, page_y1))
+                        
+                        table_element = TableElement(
+                            element_id=f"table-{page_idx}-{i}",
+                            content=table_content,
+                            bbox=BoundingBox(
+                                x0=page_x0,
+                                y0=page_y0,
+                                x1=page_x1,
+                                y1=page_y1,
+                                page=page_idx,
+                            ),
+                            metadata={
+                                "table_type": class_name,
+                                "confidence": float(score),
+                            },
+                        )
+                        table_elements.append(table_element)
+                
+                return table_elements
+            except (UnidentifiedImageError, FileNotFoundError) as e:
+                # Added error handling for image loading issues
+                logger.warning(f"Error loading image: {e}")
+                return []
         finally:
             # Clean up temporary file
             if os.path.exists(img_path):
                 os.unlink(img_path)
-    
-    def _extract_table_content(self, page: fitz.Page, bbox: Tuple[float, float, float, float]) -> List[List[str]]:
-        """Extract table content based on detected bounding box.
-        
-        This is a simplified implementation. A more advanced version would
-        use table structure recognition to identify rows and columns.
-        
-        Args:
-            page: PyMuPDF page object.
-            bbox: Table bounding box (x0, y0, x1, y1).
-            
-        Returns:
-            Table content as a list of rows.
-        """
-        # Extract text within the bounding box
-        x0, y0, x1, y1 = bbox
-        table_rect = fitz.Rect(x0, y0, x1, y1)
-        text_blocks = page.get_text("blocks", clip=table_rect)
-        
-        # Simple row detection based on y-coordinates
-        y_positions = []
-        block_texts = []
-        
-        for block in text_blocks:
-            block_x0, block_y0, block_x1, block_y1, text, block_type, block_no = block
-            if text.strip():
-                y_positions.append((block_y0 + block_y1) / 2)  # Middle of the block
-                block_texts.append((text.strip(), block_x0))  # Store text and x-position
-        
-        # Group by similar y-positions (rows)
-        if not y_positions:
-            return []
-            
-        # Cluster y-positions
-        rows = {}
-        y_tolerance = 5  # pixels
-        
-        for i, (text, x_pos) in enumerate(block_texts):
-            y_mid = y_positions[i]
-            y_bin = round(y_mid / y_tolerance) * y_tolerance
-            
-            if y_bin not in rows:
-                rows[y_bin] = []
-            
-            rows[y_bin].append((text, x_pos))
-        
-        # Sort rows by y-coordinate and cells by x-coordinate
-        sorted_rows = []
-        for y_bin in sorted(rows.keys()):
-            cells = rows[y_bin]
-            cells.sort(key=lambda x: x[1])  # Sort by x-position
-            sorted_rows.append([cell[0] for cell in cells])
-        
-        return sorted_rows
