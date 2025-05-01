@@ -3,20 +3,22 @@
 import json
 import logging
 import sys
+import os
 from pathlib import Path
 import subprocess
 from typing import List, Optional
 import typer
-from rich.console import Console # Keep this import
+from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 # Make sure these imports are direct, not from another module
 from mmrag.document_processing.factory import get_processor
 from mmrag.document_processing.base import ProcessedDocument
-from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # Import new exceptions
-from rich.progress import TimeElapsedColumn # Import TimeElapsedColumn
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError
+from rich.progress import TimeElapsedColumn
 from mmrag.vectordb import ChromaStore
+from mmrag.document_processing.llamaparse.utils import get_llamaparse_cost_estimate
 
 # Set up logging
 logging.basicConfig(
@@ -40,24 +42,49 @@ def process(
     advanced_tables: bool = typer.Option(False, help="Use advanced table detection (ML-based)"),
     enhanced_visual: bool = typer.Option(False, help="Use enhanced visual element detection"),
     llm_analysis: bool = typer.Option(False, help="Enable LLM content analysis"),
+    use_docling: bool = typer.Option(False, help="Use Docling processor if available"),
+    use_llamaparse: bool = typer.Option(False, help="Use LlamaParse processor if available"),
+    llamaparse_multimodal: bool = typer.Option(True, help="Enable multimodal processing for LlamaParse"),
+    llamaparse_api_key: Optional[str] = typer.Option(None, help="LlamaParse API key (defaults to LLAMA_CLOUD_API_KEY env variable)"),
+    estimate_cost: bool = typer.Option(False, help="Estimate LlamaParse processing cost without processing"),
 ):
-    use_docling: bool = typer.Option(True, help="Use Docling processor if available"),  # New option
     """Process a document and extract its elements."""
     if not file_path.exists():
         console.print(f"[bold red]Error:[/] File not found: {file_path}")
         raise typer.Exit(code=1)
+    
+    # If estimating cost only, do that and exit
+    if estimate_cost and use_llamaparse:
+        console.print("\n[bold]LlamaParse Cost Estimate[/]")
+        cost_estimate = get_llamaparse_cost_estimate(
+            file_path=str(file_path),
+            use_multimodal=llamaparse_multimodal,
+            multimodal_model="anthropic-sonnet-3.5"  # Default model
+        )
+        for key, value in cost_estimate.items():
+            console.print(f"{key}: {value}")
+        return
+        
+    # Extra parameters for LlamaParse
+    extra_kwargs = {}
+    if use_llamaparse:
+        extra_kwargs["use_multimodal"] = llamaparse_multimodal
+        if llamaparse_api_key:
+            extra_kwargs["llamaparse_api_key"] = llamaparse_api_key
 
     # Get appropriate processor - explicitly call get_processor to ensure our mock works
     try:
         processor = get_processor(
             file_path,
-            use_docling=use_docling, # Pass the new parameter
-            # Pass other options directly to the factory
+            use_docling=use_docling,
+            use_llamaparse=use_llamaparse,
+            # Pass options directly to the factory
             extract_tables=extract_tables,
             extract_images=extract_images,
             advanced_table_detection=advanced_tables,
             enable_enhanced_visual=enhanced_visual,
             enable_llm_analysis=llm_analysis,
+            **extra_kwargs
         )
     except ValueError as e:
         console.print(f"[bold red]Error:[/] {e}")
@@ -66,7 +93,7 @@ def process(
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
-        TimeElapsedColumn(), # Add elapsed time column
+        TimeElapsedColumn(),
         console=console,
     ) as progress:
         progress.add_task(description="Processing document...", total=None)
@@ -88,6 +115,10 @@ def process(
     console.print(f"File: {processed_doc.filename}")
     console.print(f"Type: {processed_doc.doc_type}")
     console.print(f"Elements extracted: {len(processed_doc.elements)}")
+    
+    # Print processor type
+    processor_type = type(processor).__name__
+    console.print(f"Processor used: {processor_type}")
 
     # Element type counts
     element_types = {}
@@ -117,7 +148,10 @@ def store(
     advanced_tables: bool = typer.Option(False, help="Use advanced table detection"),
     enhanced_visual: bool = typer.Option(False, help="Use enhanced visual element detection"),
     llm_analysis: bool = typer.Option(False, help="Enable LLM content analysis"),
-    use_docling: bool = typer.Option(True, help="Use Docling processor if available"), # New option
+    use_docling: bool = typer.Option(False, help="Use Docling processor if available"),
+    use_llamaparse: bool = typer.Option(False, help="Use LlamaParse processor if available"),
+    llamaparse_multimodal: bool = typer.Option(True, help="Enable multimodal processing for LlamaParse"),
+    llamaparse_api_key: Optional[str] = typer.Option(None, help="LlamaParse API key (defaults to LLAMA_CLOUD_API_KEY env variable)"),
 ):
     """Process a document and store it in the vector database."""
     # Check if the file exists first
@@ -125,17 +159,26 @@ def store(
         console.print(f"[bold red]Error:[/] File not found: {file_path}")
         raise typer.Exit(code=1)
     
+    # Extra parameters for LlamaParse
+    extra_kwargs = {}
+    if use_llamaparse:
+        extra_kwargs["use_multimodal"] = llamaparse_multimodal
+        if llamaparse_api_key:
+            extra_kwargs["llamaparse_api_key"] = llamaparse_api_key
+    
     # Get appropriate processor - ensure mocks work
     try:
         processor = get_processor(
             file_path,
-            use_docling=use_docling, # Pass the new parameter
+            use_docling=use_docling,
+            use_llamaparse=use_llamaparse,
             # Pass other options directly to the factory
             extract_tables=extract_tables,
             extract_images=extract_images,
             advanced_table_detection=advanced_tables,
             enable_enhanced_visual=enhanced_visual,
             enable_llm_analysis=llm_analysis,
+            **extra_kwargs
         )
     except ValueError as e:
         console.print(f"[bold red]Error:[/] {e}")
@@ -145,7 +188,7 @@ def store(
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
-        TimeElapsedColumn(), # Add elapsed time column
+        TimeElapsedColumn(),
         console=console,
     ) as progress:
         progress.add_task(description="Processing document...", total=None)
@@ -179,6 +222,7 @@ def store(
     console.print("\n[bold green]Document stored successfully![/]")
     console.print(f"Document ID: {processed_doc.document_id}")
     console.print(f"Collection: {collection_name}")
+    console.print(f"Processor used: {type(processor).__name__}")
 
 
 @app.command()

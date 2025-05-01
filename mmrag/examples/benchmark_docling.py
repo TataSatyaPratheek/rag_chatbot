@@ -1,15 +1,15 @@
-# examples/benchmark_docling.py
+"""Benchmark comparison between legacy, Docling, and LlamaParse processors."""
 
 import json
+import os
 from pathlib import Path
-from mmrag.exceptions import ProcessingError, ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from mmrag.benchmark.comparison import ProcessingBenchmark
+from mmrag.exceptions import ProcessingError, ProcessingTimeoutError, MemoryLimitExceededError
 
-# --- Added: Get the directory of the current script ---
+# Get the directory of the current script
 script_dir = Path(__file__).parent.resolve()
-# --- End Added ---
 
 # Define test corpus
 test_documents = [
@@ -30,7 +30,6 @@ test_queries = [
 ]
 
 # Define relevance judgments (for evaluation)
-# Format: {query: [list of relevant document_element_ids]}
 relevance_judgments = {
     "What was the revenue in Q2 2023?": ["financial_report-abc123_table-0-2", "annual_report-def456_text-3-5"],
     "Show me the financial highlights from 2022": ["annual_report-def456_chart-1-0", "financial_report-abc123_text-2-7"],
@@ -39,37 +38,42 @@ relevance_judgments = {
 
 def generate_visual_comparison(benchmark_results, output_html_path="benchmark_comparison.html"):
     """Generates an HTML report with Plotly subplots comparing benchmark results."""
+    # Define configs to compare
     legacy_config = "legacy_t1_i1_a0_e0"
     docling_config = "docling_t1_i1_a0_e0"
-
-    legacy_data = benchmark_results.get(legacy_config)
-    docling_data = benchmark_results.get(docling_config)
-
-    if not legacy_data or not docling_data:
-        print("[Warning] Cannot generate visual comparison: Missing data for one or both configurations.")
+    llamaparse_config = "llamaparse_t1_i1_a0_e0"
+    
+    configs = [config for config in [legacy_config, docling_config, llamaparse_config] 
+               if config in benchmark_results]
+    
+    # Skip if we don't have at least two configs to compare
+    if len(configs) < 2:
+        print(f"[Warning] Need at least 2 configurations to compare. Found: {len(configs)}")
         return
-
+    
+    # Extract data for each config
+    config_data = {config: benchmark_results.get(config) for config in configs}
+    labels = [config.split('_')[0].capitalize() for config in configs]
+    
     # --- Data Extraction ---
-    configs = [legacy_config, docling_config]
-    labels = ["Legacy", "Docling"]
-
+    
     # Time Metrics
-    processing_times = [legacy_data.get("time_metrics", {}).get("processing_time", 0),
-                        docling_data.get("time_metrics", {}).get("processing_time", 0)]
+    processing_times = [config_data[config].get("time_metrics", {}).get("processing_time", 0)
+                        for config in configs]
 
-    # Memory Metrics (Using peak_memory_delta as an example)
-    memory_usage = [legacy_data.get("space_metrics", {}).get("peak_memory_delta", 0) / (1024**2), # Convert to MB
-                    docling_data.get("space_metrics", {}).get("peak_memory_delta", 0) / (1024**2)]
+    # Memory Metrics
+    memory_usage = [config_data[config].get("space_metrics", {}).get("peak_memory_delta", 0) / (1024**2)
+                    for config in configs]  # Convert to MB
 
     # Element Counts (Aggregate across documents)
     all_element_types = set()
     element_counts = {label: {} for label in labels}
 
     for i, config_name in enumerate(configs):
-        config_data = benchmark_results.get(config_name)
-        if config_data and "document_metrics" in config_data:
-            for doc_metrics in config_data["document_metrics"].values():
-                 if isinstance(doc_metrics, dict) and "extraction_metrics" in doc_metrics and "element_counts" in doc_metrics["extraction_metrics"]:
+        config_data_item = config_data[config_name]
+        if config_data_item and "document_metrics" in config_data_item:
+            for doc_metrics in config_data_item["document_metrics"].values():
+                if isinstance(doc_metrics, dict) and "extraction_metrics" in doc_metrics and "element_counts" in doc_metrics["extraction_metrics"]:
                     counts = doc_metrics["extraction_metrics"]["element_counts"]
                     all_element_types.update(counts.keys())
                     for el_type, count in counts.items():
@@ -77,36 +81,41 @@ def generate_visual_comparison(benchmark_results, output_html_path="benchmark_co
 
     sorted_element_types = sorted(list(all_element_types))
 
-    # Retrieval Metrics (Averages) - Handle potential missing data
-    retrieval_metrics_available = ("retrieval_metrics" in legacy_data and legacy_data["retrieval_metrics"] and "query_time" in legacy_data["retrieval_metrics"] and
-                                   "retrieval_metrics" in docling_data and docling_data["retrieval_metrics"] and "query_time" in docling_data["retrieval_metrics"])
+    # Retrieval Metrics (Averages)
+    retrieval_metrics_available = all(
+        "retrieval_metrics" in config_data[config] and 
+        config_data[config]["retrieval_metrics"] and 
+        "query_time" in config_data[config]["retrieval_metrics"]
+        for config in configs
+    )
 
-    avg_query_times = [0, 0]
-    avg_mrr = [0, 0]
+    avg_query_times = []
+    avg_mrr = []
 
     if retrieval_metrics_available:
-        for i, config_name in enumerate(configs):
-            retrieval_data = benchmark_results[config_name]["retrieval_metrics"]
+        for config_name in configs:
+            retrieval_data = config_data[config_name]["retrieval_metrics"]
             # Avg Query Time
             query_times = list(retrieval_data.get("query_time", {}).values())
-            if query_times:
-                avg_query_times[i] = sum(query_times) / len(query_times)
+            avg_time = sum(query_times) / len(query_times) if query_times else 0
+            avg_query_times.append(avg_time)
+            
             # Avg MRR
             relevance_data = retrieval_data.get("relevance", {})
             mrr_values = [q_metrics.get("mrr", 0) for q_metrics in relevance_data.values()]
-            if mrr_values:
-                avg_mrr[i] = sum(mrr_values) / len(mrr_values)
+            avg_mrr_val = sum(mrr_values) / len(mrr_values) if mrr_values else 0
+            avg_mrr.append(avg_mrr_val)
 
     # --- Plotting ---
     subplot_titles = ["Avg Processing Time", "Peak Memory Usage", "Element Extraction Counts"]
     rows = 2
     cols = 2
     specs = [[{}, {}], [{"colspan": 2}, None]]
+    
     if retrieval_metrics_available:
         subplot_titles.extend(["Avg Query Time", "Avg MRR"])
         rows = 3
         specs = [[{}, {}], [{"colspan": 2}, None], [{}, {}]]
-
 
     fig = make_subplots(
         rows=rows, cols=cols,
@@ -126,7 +135,7 @@ def generate_visual_comparison(benchmark_results, output_html_path="benchmark_co
     for i, label in enumerate(labels):
         counts = [element_counts[label].get(el_type, 0) for el_type in sorted_element_types]
         fig.add_trace(go.Bar(x=sorted_element_types, y=counts, name=label), row=2, col=1)
-    fig.update_layout(barmode='group') # Group bars for element counts plot
+    fig.update_layout(barmode='group')  # Group bars for element counts plot
     fig.update_yaxes(title_text="Count", row=2, col=1)
 
     # Plot 4 & 5: Retrieval Metrics (if available)
@@ -139,118 +148,128 @@ def generate_visual_comparison(benchmark_results, output_html_path="benchmark_co
 
     # Update overall layout
     fig.update_layout(
-        title_text="Benchmark Comparison: Legacy vs. Docling",
-        height=400 * rows, # Adjust height based on rows
+        title_text=f"Benchmark Comparison: {', '.join(labels)}",
+        height=400 * rows,  # Adjust height based on rows
         showlegend=True
     )
 
     # Save to HTML
-    fig.write_html(str(output_html_path)) # Ensure path is string for write_html
+    fig.write_html(str(output_html_path))  # Ensure path is string for write_html
     print(f"\nVisual comparison saved to {output_html_path}")
 
-# Initialize benchmark
-benchmark = ProcessingBenchmark(
-    document_paths=test_documents,
-    queries=test_queries,
-    relevance_judgments=relevance_judgments,
-    memory_limit_fraction=0.5 # Example: Limit processors to 50% of available memory
-)
+def main():
+    # Initialize benchmark
+    benchmark = ProcessingBenchmark(
+        document_paths=test_documents,
+        queries=test_queries,
+        relevance_judgments=relevance_judgments,
+        memory_limit_fraction=0.5  # Example: Limit processors to 50% of available memory
+    )
 
-# Run benchmark with legacy processors
-print("Running benchmark with legacy processors...")
-legacy_results = None
-try:
-    legacy_results = benchmark.run_benchmark(use_docling=False)
-except MemoryLimitExceededError as e:
-    print(f"[ERROR] Legacy processing failed due to memory limit: {e}")
-except ProcessingTimeoutError as e:
-    print(f"[ERROR] Legacy processing failed due to timeout: {e}")
-except ProcessingError as e:
-    print(f"[ERROR] Legacy processing failed: {e}")
-except Exception as e:
-    print(f"[ERROR] Unexpected error during legacy benchmark: {e}")
+    # Results storage
+    all_results = {}
 
-# Run benchmark with Docling
-print("Running benchmark with Docling...")
-docling_results = None
-try:
-    docling_results = benchmark.run_benchmark(use_docling=True)
-except MemoryLimitExceededError as e:
-    print(f"[ERROR] Docling processing failed due to memory limit: {e}")
-except ProcessingTimeoutError as e:
-    print(f"[ERROR] Docling processing failed due to timeout: {e}")
-except ProcessingError as e:
-    print(f"[ERROR] Docling processing failed: {e}")
-except Exception as e:
-    print(f"[ERROR] Unexpected error during Docling benchmark: {e}")
+    # Run legacy benchmark
+    print("Running benchmark with legacy processors...")
+    try:
+        legacy_results = benchmark.run_benchmark(use_docling=False, use_llamaparse=False)
+        all_results.update(benchmark.results)
+        print("  Legacy benchmark completed successfully")
+    except Exception as e:
+        print(f"[ERROR] Legacy processing failed: {e}")
 
-# Compare results
-comparison = None
-if legacy_results and docling_results:
-    comparison = benchmark.compare_configs(["legacy_t1_i1_a0_e0", "docling_t1_i1_a0_e0"])
-else:
-    print("\nSkipping comparison due to processing errors.")
+    # Run Docling benchmark
+    print("\nRunning benchmark with Docling...")
+    try:
+        docling_results = benchmark.run_benchmark(use_docling=True, use_llamaparse=False)
+        all_results.update(benchmark.results)
+        print("  Docling benchmark completed successfully")
+    except Exception as e:
+        print(f"[ERROR] Docling processing failed: {e}")
+    
+    # Run LlamaParse benchmark
+    print("\nRunning benchmark with LlamaParse...")
+    try:
+        # Check for LlamaParse API key in environment
+        if "LLAMA_CLOUD_API_KEY" not in os.environ:
+            print("[WARNING] LLAMA_CLOUD_API_KEY not found in environment. Skipping LlamaParse benchmark.")
+        else:
+            llamaparse_results = benchmark.run_benchmark(use_docling=False, use_llamaparse=True)
+            all_results.update(benchmark.results)
+            print("  LlamaParse benchmark completed successfully")
+    except Exception as e:
+        print(f"[ERROR] LlamaParse processing failed: {e}")
 
-# --- Define config names for summary ---
-legacy_config = "legacy_t1_i1_a0_e0"
-docling_config = "docling_t1_i1_a0_e0"
+    # Define config names for summary
+    legacy_config = "legacy_t1_i1_a0_e0"
+    docling_config = "docling_t1_i1_a0_e0"
+    llamaparse_config = "llamaparse_t1_i1_a0_e0"
 
-# --- Print Summary (Optional - Visuals provide more detail) ---
-if comparison:
-    print("\nBenchmark Summary (Text):")
-    print("==========================")
+    # Get available configs
+    configs = [config for config in [legacy_config, docling_config, llamaparse_config] 
+               if config in all_results]
+    
+    # Compare results if we have at least two configs
+    if len(configs) >= 2:
+        comparison = benchmark.compare_configs(configs)
+        
+        print("\nBenchmark Summary (Text):")
+        print("==========================")
+        
+        # Generate comparative statements for each pair of processors
+        for i, config1 in enumerate(configs):
+            for config2 in configs[i+1:]:
+                # Skip if either config is missing results
+                if config1 not in all_results or config2 not in all_results:
+                    continue
+                    
+                processor1 = config1.split('_')[0].capitalize()
+                processor2 = config2.split('_')[0].capitalize()
+                print(f"\n{processor1} vs. {processor2}:")
+                
+                # Processing time comparison
+                time1 = all_results[config1].get("time_metrics", {}).get("processing_time", 0)
+                time2 = all_results[config2].get("time_metrics", {}).get("processing_time", 0)
+                
+                if time1 > 0 and time2 > 0:
+                    time_diff = (time1 - time2) / time1 * 100
+                    faster = processor2 if time_diff > 0 else processor1
+                    slower = processor1 if time_diff > 0 else processor2
+                    print(f"  Processing Time: {faster} is {abs(time_diff):.2f}% faster than {slower}")
+                
+                # Memory usage comparison
+                mem1 = all_results[config1].get("space_metrics", {}).get("peak_memory_delta", 0)
+                mem2 = all_results[config2].get("space_metrics", {}).get("peak_memory_delta", 0)
+                
+                if mem1 > 0 and mem2 > 0:
+                    mem_diff = (mem1 - mem2) / mem1 * 100
+                    efficient = processor2 if mem_diff > 0 else processor1
+                    inefficient = processor1 if mem_diff > 0 else processor2
+                    print(f"  Memory Usage: {efficient} uses {abs(mem_diff):.2f}% less memory than {inefficient}")
+                
+                # Element extraction comparison
+                if "extraction_comparison" in comparison:
+                    elements1 = sum(comparison["extraction_comparison"][el_type].get(config1, 0) 
+                                    for el_type in comparison["extraction_comparison"])
+                    elements2 = sum(comparison["extraction_comparison"][el_type].get(config2, 0) 
+                                    for el_type in comparison["extraction_comparison"])
+                    
+                    if elements1 > 0 and elements2 > 0:
+                        el_diff = (elements2 - elements1) / elements1 * 100
+                        better = processor2 if el_diff > 0 else processor1
+                        worse = processor1 if el_diff > 0 else processor2
+                        print(f"  Element Extraction: {better} extracted {abs(el_diff):.2f}% {'more' if el_diff > 0 else 'fewer'} elements than {worse}")
+        
+        # Generate visual comparison
+        output_html_path = script_dir / "benchmark_comparison.html"
+        generate_visual_comparison(all_results, output_html_path=output_html_path)
+    else:
+        print("\nNot enough successful benchmarks to compare results.")
 
-    # Processing time comparison
-    if legacy_results and docling_results:
-        legacy_time = legacy_results.get("time_metrics", {}).get("processing_time", 0)
-        docling_time = docling_results.get("time_metrics", {}).get("processing_time", 0)
-        if legacy_time > 0 and docling_time > 0:
-            time_diff = (legacy_time - docling_time) / legacy_time * 100
-            print(f"Processing Time: Docling is {abs(time_diff):.2f}% {'faster' if time_diff > 0 else 'slower'}")
-        elif legacy_time > 0:
-             print("Processing Time: Docling failed or took 0 time.")
-        elif docling_time > 0:
-             print("Processing Time: Legacy failed or took 0 time.")
+    # Save detailed results
+    json_output_path = script_dir / "benchmark_results.json"
+    benchmark.save_results(json_output_path)
+    print(f"\nDetailed results saved to {json_output_path}")
 
-    # Memory usage comparison
-    if legacy_results and docling_results:
-        legacy_mem = legacy_results.get("space_metrics", {}).get("peak_memory_delta", 0)
-        docling_mem = docling_results.get("space_metrics", {}).get("peak_memory_delta", 0)
-        if legacy_mem > 0 and docling_mem > 0:
-            mem_diff = (legacy_mem - docling_mem) / legacy_mem * 100
-            print(f"Memory Usage (Peak Delta): Docling uses {abs(mem_diff):.2f}% {'less' if mem_diff > 0 else 'more'} memory")
-        elif legacy_mem > 0:
-             print("Memory Usage: Docling failed or used 0 memory.")
-        elif docling_mem > 0:
-             print("Memory Usage: Legacy failed or used 0 memory.")
-
-    # Element extraction comparison
-    if "extraction_comparison" in comparison:
-        for element_type in comparison["extraction_comparison"]:
-            legacy_count = comparison["extraction_comparison"][element_type].get(legacy_config, 0)
-            docling_count = comparison["extraction_comparison"][element_type].get(docling_config, 0)
-            if legacy_count > 0:
-                diff = (docling_count - legacy_count) / legacy_count * 100
-                print(f"{element_type.capitalize()} Extraction: Docling extracted {abs(diff):.2f}% {'more' if diff > 0 else 'fewer'}")
-            elif docling_count > 0:
-                 print(f"{element_type.capitalize()} Extraction: Docling extracted {docling_count}, Legacy extracted 0.")
-
-    # Retrieval metrics comparison (Simplified text summary)
-    if comparison and "retrieval_comparison" in comparison and "avg_query_time" in comparison["retrieval_comparison"]:
-         legacy_rt = comparison["retrieval_comparison"]["avg_query_time"].get(legacy_config)
-         docling_rt = comparison["retrieval_comparison"]["avg_query_time"].get(docling_config)
-         if legacy_rt and docling_rt and legacy_rt > 0:
-             rt_diff = (legacy_rt - docling_rt) / legacy_rt * 100
-             print(f"Avg Query Time: Docling is {abs(rt_diff):.2f}% {'faster' if rt_diff > 0 else 'slower'}")
-
-# --- Define output paths ---
-json_output_path = script_dir / "benchmark_results.json"
-html_output_path = script_dir / "benchmark_comparison.html"
-
-# Save detailed results
-benchmark.save_results(json_output_path)
-print(f"\nDetailed results saved to {json_output_path}")
-
-# --- Generate Visual Comparison ---
-if benchmark.results:
-    generate_visual_comparison(benchmark.results, output_html_path=html_output_path)
+if __name__ == "__main__":
+    main()

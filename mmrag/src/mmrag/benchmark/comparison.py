@@ -1,4 +1,4 @@
-# src/mmrag/benchmark/comparison.py
+"""Benchmarking utilities for comparing document processors."""
 
 import time
 import json
@@ -12,7 +12,8 @@ from typing import Dict, List, Optional, Union, Callable, Any
 
 from mmrag.document_processing.factory import get_processor
 from mmrag.vectordb.chroma import ChromaStore
-from mmrag.exceptions import ProcessingError, ProcessingTimeoutError, MemoryLimitExceededError # Import exceptions
+from mmrag.exceptions import ProcessingError, ProcessingTimeoutError, MemoryLimitExceededError
+
 # Configure logger
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +27,7 @@ class ProcessingBenchmark:
         document_paths: List[Union[str, Path]],
         queries: Optional[List[str]] = None,
         relevance_judgments: Optional[Dict] = None,
-        memory_limit_fraction: float = 0.5, # Add memory limit fraction
+        memory_limit_fraction: float = 0.5,
     ):
         """Initialize the benchmark.
 
@@ -34,26 +35,31 @@ class ProcessingBenchmark:
             document_paths: Paths to documents for benchmarking.
             queries: Optional list of queries for retrieval benchmarking.
             relevance_judgments: Optional relevance judgments for queries.
+            memory_limit_fraction: Maximum memory usage as fraction of available.
         """
         self.document_paths = [Path(p) for p in document_paths]
         self.queries = queries or []
         self.relevance_judgments = relevance_judgments or {}
-        self.memory_limit_fraction = memory_limit_fraction # Store memory limit
+        self.memory_limit_fraction = memory_limit_fraction
         self.results = {}
 
     def run_benchmark(
         self,
         use_docling: bool = False,
+        use_llamaparse: bool = False,
+        llamaparse_api_key: Optional[str] = None,
         extract_tables: bool = True,
         extract_images: bool = True,
         advanced_tables: bool = False,
         enhanced_visual: bool = False,
-        memory_limit_fraction: Optional[float] = None, # Allow overriding memory limit per run
+        memory_limit_fraction: Optional[float] = None,
     ):
         """Run benchmark with specified settings.
 
         Args:
             use_docling: Whether to use Docling.
+            use_llamaparse: Whether to use LlamaParse.
+            llamaparse_api_key: API key for LlamaParse (optional).
             extract_tables: Whether to extract tables.
             extract_images: Whether to extract images.
             advanced_tables: Whether to use advanced table detection.
@@ -64,7 +70,16 @@ class ProcessingBenchmark:
             Benchmark results.
         """
         mem_limit = memory_limit_fraction if memory_limit_fraction is not None else self.memory_limit_fraction
-        config_name = f"{'docling' if use_docling else 'legacy'}_t{int(extract_tables)}_i{int(extract_images)}_a{int(advanced_tables)}_e{int(enhanced_visual)}"
+        
+        # Generate a unique config name based on processor and settings
+        if use_llamaparse:
+            processor_prefix = "llamaparse"
+        elif use_docling:
+            processor_prefix = "docling"
+        else:
+            processor_prefix = "legacy"
+            
+        config_name = f"{processor_prefix}_t{int(extract_tables)}_i{int(extract_images)}_a{int(advanced_tables)}_e{int(enhanced_visual)}"
 
         self.results[config_name] = {
             "time_metrics": {},
@@ -78,11 +93,13 @@ class ProcessingBenchmark:
             doc_metrics = self._benchmark_document_processing(
                 doc_path,
                 use_docling=use_docling,
+                use_llamaparse=use_llamaparse,
+                llamaparse_api_key=llamaparse_api_key,
                 extract_tables=extract_tables,
                 extract_images=extract_images,
                 advanced_tables=advanced_tables,
                 enhanced_visual=enhanced_visual,
-                memory_limit_fraction=mem_limit, # Pass memory limit
+                memory_limit_fraction=mem_limit,
             )
 
             # Store per-document metrics
@@ -106,20 +123,22 @@ class ProcessingBenchmark:
         # Calculate averages for aggregated metrics
         for metric_type in ["time_metrics", "space_metrics"]:
             for k, v in self.results[config_name][metric_type].items():
-                if v: # Ensure list is not empty
+                if v:  # Ensure list is not empty
                     self.results[config_name][metric_type][k] = sum(v) / len(v)
                 else:
-                    self.results[config_name][metric_type][k] = 0 # Or handle as appropriate
+                    self.results[config_name][metric_type][k] = 0  # Or handle as appropriate
 
         # Measure retrieval metrics if queries provided
         if self.queries:
             retrieval_metrics = self._benchmark_retrieval(
                 use_docling=use_docling,
+                use_llamaparse=use_llamaparse,
+                llamaparse_api_key=llamaparse_api_key,
                 extract_tables=extract_tables,
                 extract_images=extract_images,
                 advanced_tables=advanced_tables,
                 enhanced_visual=enhanced_visual,
-                memory_limit_fraction=mem_limit, # Pass memory limit
+                memory_limit_fraction=mem_limit,
             )
             self.results[config_name]["retrieval_metrics"] = retrieval_metrics
 
@@ -129,18 +148,20 @@ class ProcessingBenchmark:
         self,
         document_path: Path,
         use_docling: bool = False,
+        use_llamaparse: bool = False,
+        llamaparse_api_key: Optional[str] = None,
         extract_tables: bool = True,
         extract_images: bool = True,
         advanced_tables: bool = False,
         enhanced_visual: bool = False,
-        memory_limit_fraction: float = 0.5, # Receive memory limit
+        memory_limit_fraction: float = 0.5,
     ) -> Dict:
         """Benchmark processing of a single document."""
         metrics = {
             "time_metrics": {},
             "space_metrics": {},
             "extraction_metrics": {},
-            "error": None, # Add error field
+            "error": None,
             "error_type": None,
         }
 
@@ -149,16 +170,25 @@ class ProcessingBenchmark:
         process = psutil.Process(os.getpid())
         initial_memory = process.memory_info().rss
 
+        # Prepare extra arguments for LlamaParse
+        extra_kwargs = {}
+        if use_llamaparse:
+            extra_kwargs["use_multimodal"] = enhanced_visual  # Use multimodal for charts if enhanced visual is enabled
+            if llamaparse_api_key:
+                extra_kwargs["llamaparse_api_key"] = llamaparse_api_key
+
         # Time processor initialization
         init_start = time.time()
         processor = get_processor(
             document_path,
+            use_docling=use_docling,
+            use_llamaparse=use_llamaparse,
             extract_tables=extract_tables,
             extract_images=extract_images,
             advanced_table_detection=advanced_tables,
             enable_enhanced_visual=enhanced_visual,
-            use_docling=use_docling,
-            memory_limit_fraction=memory_limit_fraction, # Pass memory limit to factory
+            memory_limit_fraction=memory_limit_fraction,
+            **extra_kwargs
         )
         init_time = time.time() - init_start
         metrics["time_metrics"]["initialization_time"] = init_time
@@ -175,7 +205,7 @@ class ProcessingBenchmark:
             if page_count and page_count > 0:
                 metrics["time_metrics"]["time_per_page"] = process_time / page_count
             else:
-                 metrics["time_metrics"]["time_per_page"] = 0
+                metrics["time_metrics"]["time_per_page"] = 0
 
             # Memory metrics
             current, peak = tracemalloc.get_traced_memory()
@@ -209,16 +239,16 @@ class ProcessingBenchmark:
 
                 # Get file size
                 metrics["space_metrics"]["serialized_size"] = os.path.getsize(tmp.name)
-            os.unlink(tmp.name) # Clean up temp file
+            os.unlink(tmp.name)  # Clean up temp file
 
         except (ProcessingError, ProcessingTimeoutError, MemoryLimitExceededError) as e:
             process_time = time.time() - process_start
-            metrics["time_metrics"]["processing_time"] = process_time # Record time until error
+            metrics["time_metrics"]["processing_time"] = process_time  # Record time until error
             metrics["error"] = str(e)
             metrics["error_type"] = type(e).__name__
-            tracemalloc.stop() # Ensure tracemalloc stops on error
+            tracemalloc.stop()  # Ensure tracemalloc stops on error
             logger.warning(f"Processing failed for {document_path.name}: {e}")
-        except Exception as e: # Catch unexpected errors
+        except Exception as e:  # Catch unexpected errors
             process_time = time.time() - process_start
             metrics["time_metrics"]["processing_time"] = process_time
             metrics["error"] = f"Unexpected error: {str(e)}"
@@ -231,11 +261,13 @@ class ProcessingBenchmark:
     def _benchmark_retrieval(
         self,
         use_docling: bool = False,
+        use_llamaparse: bool = False,
+        llamaparse_api_key: Optional[str] = None,
         extract_tables: bool = True,
         extract_images: bool = True,
         advanced_tables: bool = False,
         enhanced_visual: bool = False,
-        memory_limit_fraction: float = 0.5, # Receive memory limit
+        memory_limit_fraction: float = 0.5,
     ) -> Dict:
         """Benchmark retrieval performance."""
         if not self.queries:
@@ -251,17 +283,26 @@ class ProcessingBenchmark:
             # Initialize vector store
             store = ChromaStore(persist_directory=tmp_dir)
 
+            # Prepare extra arguments for LlamaParse
+            extra_kwargs = {}
+            if use_llamaparse:
+                extra_kwargs["use_multimodal"] = enhanced_visual
+                if llamaparse_api_key:
+                    extra_kwargs["llamaparse_api_key"] = llamaparse_api_key
+
             # Process and store documents
             try:
                 for doc_path in self.document_paths:
                     processor = get_processor(
                         doc_path,
+                        use_docling=use_docling,
+                        use_llamaparse=use_llamaparse,
                         extract_tables=extract_tables,
                         extract_images=extract_images,
                         advanced_table_detection=advanced_tables,
                         enable_enhanced_visual=enhanced_visual,
-                        use_docling=use_docling,
-                        memory_limit_fraction=memory_limit_fraction, # Pass memory limit
+                        memory_limit_fraction=memory_limit_fraction,
+                        **extra_kwargs
                     )
                     document = processor.process(doc_path)
                     store.add_document(document)
@@ -283,20 +324,20 @@ class ProcessingBenchmark:
                 # Calculate relevance metrics if judgments available
                 if query in self.relevance_judgments:
                     relevant_ids = set(self.relevance_judgments[query])
-                    retrieved_ids = [id_val for id_val in results["ids"][0]] # Renamed id to id_val
+                    retrieved_ids = [id_val for id_val in results["ids"][0]]
 
                     # Precision@k for k=5
-                    relevant_at_5 = sum(1 for id_val in retrieved_ids[:5] if id_val in relevant_ids) # Renamed id to id_val
+                    relevant_at_5 = sum(1 for id_val in retrieved_ids[:5] if id_val in relevant_ids)
                     precision_at_5 = relevant_at_5 / 5 if len(retrieved_ids) >= 5 else 0
 
                     # Recall@k for k=10
-                    relevant_at_10 = sum(1 for id_val in retrieved_ids[:10] if id_val in relevant_ids) # Renamed id to id_val
+                    relevant_at_10 = sum(1 for id_val in retrieved_ids[:10] if id_val in relevant_ids)
                     recall_at_10 = relevant_at_10 / len(relevant_ids) if relevant_ids else 0
 
                     # Mean Reciprocal Rank
                     mrr = 0
-                    for rank, id_val in enumerate(retrieved_ids): # Renamed id to id_val
-                        if id_val in relevant_ids: # Renamed id to id_val
+                    for rank, id_val in enumerate(retrieved_ids):
+                        if id_val in relevant_ids:
                             mrr = 1 / (rank + 1)
                             break
 
@@ -338,14 +379,13 @@ class ProcessingBenchmark:
                 if config_name in self.results and metric in self.results[config_name].get("time_metrics", {}):
                     comparison["time_comparison"][metric][config_name] = self.results[config_name]["time_metrics"][metric]
                 else:
-                    comparison["time_comparison"][metric][config_name] = None # Indicate missing data
+                    comparison["time_comparison"][metric][config_name] = None  # Indicate missing data
 
         # Compare space metrics
         for metric in ["peak_memory_delta", "memory_usage", "serialized_size"]:
             comparison["space_comparison"][metric] = {}
-            # --- Fix: Iterate over configs instead of config ---
             for config in configs:
-                if metric in self.results[config]["space_metrics"]:
+                if config in self.results and metric in self.results[config]["space_metrics"]:
                     comparison["space_comparison"][metric][config] = self.results[config]["space_metrics"][metric]
 
         # Compare extraction metrics (aggregate across documents)
@@ -376,9 +416,10 @@ class ProcessingBenchmark:
             # Compare query time
             comparison["retrieval_comparison"]["avg_query_time"] = {}
             for config in configs:
-                query_times = self.results[config]["retrieval_metrics"].get("query_time", {}).values()
-                if query_times:
-                    comparison["retrieval_comparison"]["avg_query_time"][config] = sum(query_times) / len(query_times)
+                if config in self.results and "retrieval_metrics" in self.results[config]:
+                    query_times = self.results[config]["retrieval_metrics"].get("query_time", {}).values()
+                    if query_times:
+                        comparison["retrieval_comparison"]["avg_query_time"][config] = sum(query_times) / len(query_times)
 
             # Compare relevance metrics
             for metric in ["precision_at_5", "recall_at_10", "mrr"]:
@@ -393,7 +434,6 @@ class ProcessingBenchmark:
 
                         if relevant_metrics:
                             comparison["retrieval_comparison"][metric][config] = sum(relevant_metrics) / len(relevant_metrics)
-                        # else: comparison[metric][config] will be missing, indicating no data
 
         return comparison
 
