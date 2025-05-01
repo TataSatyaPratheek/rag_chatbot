@@ -124,7 +124,7 @@ def extract_table_elements(doc, page_idx: int, start_index: int) -> List[TableEl
     # Check for Markdown tables in the text
     if hasattr(doc, "text") and doc.text:
         # Find all markdown tables (simplified matching)
-        table_pattern = r'(\|[^\n]+\|\n\|[\s-:]+\|\n(?:\|[^\n]+\|\n)+)'
+        table_pattern = r'(\|[^\n]+\|\n\|[\s:|\-]+\|\n(?:\|[^\n]+\|\n)+)'
         tables = re.finditer(table_pattern, doc.text)
         
         for table_match in tables:

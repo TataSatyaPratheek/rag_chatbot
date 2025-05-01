@@ -163,7 +163,7 @@ def main():
         document_paths=test_documents,
         queries=test_queries,
         relevance_judgments=relevance_judgments,
-        memory_limit_fraction=0.5  # Example: Limit processors to 50% of available memory
+        memory_limit_fraction=0.8  # Allow up to 80% of available memory
     )
 
     # Results storage
