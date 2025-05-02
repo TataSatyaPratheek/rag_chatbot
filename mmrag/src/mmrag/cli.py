@@ -2,18 +2,19 @@
 
 import json
 import logging
+import asyncio
 import sys
 import os
-from pathlib import Path
+from pathlib import Path # noqa: E402
 import subprocess
-from typing import List, Optional
+from typing import List, Optional, Callable, Awaitable # noqa: E402
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-# Make sure these imports are direct, not from another module
-from mmrag.document_processing.factory import get_processor
+# Import necessary modules
+from mmrag.document_processing.factory import get_processor # noqa: E402
 from mmrag.document_processing.base import ProcessedDocument
 from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError
 from rich.progress import TimeElapsedColumn
@@ -32,9 +33,14 @@ logger = logging.getLogger("mmrag")
 console = Console()
 app = typer.Typer()
 
+# Define a simple async progress callback for the CLI
+async def cli_progress_callback(message: str, progress: Optional[float] = None):
+    # Simple console print, could be enhanced with Rich progress bar later
+    progress_text = f" [{(progress*100):.1f}%]" if progress is not None else ""
+    console.print(f"[dim]  {message}{progress_text}[/dim]")
 
 @app.command()
-def process(
+async def process(
     file_path: Path = typer.Argument(..., help="Path to the document to process"),
     output_path: Optional[Path] = typer.Option(None, help="Path to save processed document JSON"),
     extract_tables: bool = typer.Option(True, help="Extract tables from the document"),
@@ -46,6 +52,8 @@ def process(
     use_llamaparse: bool = typer.Option(False, help="Use LlamaParse processor if available"),
     llamaparse_multimodal: bool = typer.Option(True, help="Enable multimodal processing for LlamaParse"),
     llamaparse_api_key: Optional[str] = typer.Option(None, help="LlamaParse API key (defaults to LLAMA_CLOUD_API_KEY env variable)"),
+    use_openparse: bool = typer.Option(False, help="Use OpenParse processor if available"),
+    use_semantic: bool = typer.Option(False, help="Use semantic processing with OpenParse (requires OpenAI key)"),
     estimate_cost: bool = typer.Option(False, help="Estimate LlamaParse processing cost without processing"),
 ):
     """Process a document and extract its elements."""
@@ -72,6 +80,11 @@ def process(
         if llamaparse_api_key:
             extra_kwargs["llamaparse_api_key"] = llamaparse_api_key
 
+    # Add OpenParse specific args if needed (passed via kwargs to factory)
+    if use_openparse:
+        extra_kwargs["use_semantic_processing"] = use_semantic
+        # Assuming openai_key is handled via env var OPENAI_API_KEY by openparse or passed if needed
+
     # Get appropriate processor - explicitly call get_processor to ensure our mock works
     try:
         processor = get_processor(
@@ -84,6 +97,8 @@ def process(
             advanced_table_detection=advanced_tables,
             enable_enhanced_visual=enhanced_visual,
             enable_llm_analysis=llm_analysis,
+            use_openparse=use_openparse,
+            # openai_api_key=openai_key, # Pass if needed, or rely on env var
             **extra_kwargs
         )
     except ValueError as e:
@@ -100,7 +115,7 @@ def process(
 
         # Process the document
         try:
-            processed_doc = processor.process(file_path)
+            processed_doc: ProcessedDocument = await processor.process(file_path, progress_callback=cli_progress_callback)
         except Exception as e:
             # Catch specific processing errors
             if isinstance(e, (ProcessingTimeoutError, MemoryLimitExceededError)):
@@ -140,7 +155,7 @@ def process(
 
 
 @app.command()
-def store(
+async def store(
     file_path: Path = typer.Argument(..., help="Path to the document to process and store"),
     collection_name: str = typer.Option("document_elements", help="ChromaDB collection name"),
     extract_tables: bool = typer.Option(True, help="Extract tables"),
@@ -152,6 +167,8 @@ def store(
     use_llamaparse: bool = typer.Option(False, help="Use LlamaParse processor if available"),
     llamaparse_multimodal: bool = typer.Option(True, help="Enable multimodal processing for LlamaParse"),
     llamaparse_api_key: Optional[str] = typer.Option(None, help="LlamaParse API key (defaults to LLAMA_CLOUD_API_KEY env variable)"),
+    use_openparse: bool = typer.Option(False, help="Use OpenParse processor if available"),
+    use_semantic: bool = typer.Option(False, help="Use semantic processing with OpenParse (requires OpenAI key)"),
 ):
     """Process a document and store it in the vector database."""
     # Check if the file exists first
@@ -165,6 +182,11 @@ def store(
         extra_kwargs["use_multimodal"] = llamaparse_multimodal
         if llamaparse_api_key:
             extra_kwargs["llamaparse_api_key"] = llamaparse_api_key
+
+    # Add OpenParse specific args if needed
+    if use_openparse:
+        extra_kwargs["use_semantic_processing"] = use_semantic
+        # Assuming openai_key is handled via env var OPENAI_API_KEY by openparse or passed if needed
     
     # Get appropriate processor - ensure mocks work
     try:
@@ -178,6 +200,8 @@ def store(
             advanced_table_detection=advanced_tables,
             enable_enhanced_visual=enhanced_visual,
             enable_llm_analysis=llm_analysis,
+            use_openparse=use_openparse,
+            # openai_api_key=openai_key, # Pass if needed, or rely on env var
             **extra_kwargs
         )
     except ValueError as e:
@@ -194,7 +218,7 @@ def store(
         progress.add_task(description="Processing document...", total=None)
         
         try:
-            processed_doc = processor.process(file_path)
+            processed_doc: ProcessedDocument = await processor.process(file_path, progress_callback=cli_progress_callback)
         except Exception as e:
             # Catch specific processing errors
             if isinstance(e, (ProcessingTimeoutError, MemoryLimitExceededError)):
@@ -213,7 +237,7 @@ def store(
 
         try:
             store = ChromaStore(collection_name=collection_name)
-            store.add_document(processed_doc)
+            await asyncio.to_thread(store.add_document, processed_doc) # Wrap sync Chroma call
         except Exception as e:
             progress.stop()
             console.print(f"[bold red]Error storing document:[/] {e}")
@@ -226,7 +250,7 @@ def store(
 
 
 @app.command()
-def query(
+async def query(
     query_text: str = typer.Argument(..., help="Query text"),
     n_results: int = typer.Option(5, help="Number of results to return"),
     collection_name: str = typer.Option("document_elements", help="ChromaDB collection name"),
@@ -247,7 +271,9 @@ def query(
             # Prepare filter
             where = {"document_id": document_id} if document_id else None
 
-            results = store.query(
+            # Wrap sync Chroma call
+            results = await asyncio.to_thread(
+                store.query,
                 query_text=query_text,
                 n_results=n_results,
                 where=where,
@@ -275,7 +301,7 @@ def query(
 
 
 @app.command()
-def delete(
+async def delete(
     document_id: str = typer.Argument(..., help="Document ID to delete"),
     collection_name: str = typer.Option("document_elements", help="ChromaDB collection name"),
 ):
@@ -290,10 +316,16 @@ def delete(
         # Initialize vector store - ensure mocks work
         try:
             store = ChromaStore(collection_name=collection_name)
-            store.delete_document(document_id)
+            # Wrap sync Chroma call
+            await asyncio.to_thread(store.delete_document, document_id)
         except Exception as e:
             progress.stop()
             console.print(f"[bold red]Error deleting document:[/] {e}")
             raise typer.Exit(code=1)
 
     console.print(f"\n[bold green]Document {document_id} deleted successfully![/]")
+
+# Ensure the app runs asynchronously if called directly
+if __name__ == "__main__":
+    # Typer handles the async event loop automatically when using `typer.run` or when the script is run directly.
+    app()

@@ -23,7 +23,7 @@ class TestLLMIntegration:
     def ollama_available(self):
         """Check if Ollama server is available."""
         try:
-            response = httpx.get("http://localhost:11434/api/version", timeout=2)
+            response = httpx.get("http://localhost:11434/version", timeout=2)
             return response.status_code == 200
         except Exception:
             return False

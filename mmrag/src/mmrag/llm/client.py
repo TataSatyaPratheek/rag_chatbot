@@ -2,9 +2,9 @@
 """Client for local LLM integration."""
 
 import json
-import logging
-import functools
-from typing import Dict, List, Optional, Union
+import logging # Keep logging
+import functools # Keep for CachedOllamaClient
+from typing import Dict, List, Optional, Union, AsyncGenerator
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -24,7 +24,7 @@ class OllamaClient:
         self,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
-        timeout: int = 60,
+        timeout: int = 120, # Increased default timeout slightly
     ):
         """Initialize the Ollama client.
         
@@ -34,7 +34,7 @@ class OllamaClient:
             timeout: Timeout for API requests in seconds.
         """
         self.base_url = base_url or config.llm_base_url
-        self.model = model or config.llm_model
+        self.model = model or config.llm_model or "llama3.2:latest" # Updated default model
         self.timeout = timeout
     
     @retry(
@@ -146,6 +146,56 @@ class OllamaClient:
             logger.error(f"Request error: {str(e)}")
             raise LLMClientError(f"Request error: {str(e)}")
 
+    async def stream_chat(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Chat with the model asynchronously, streaming the response.
+
+        Args:
+            messages: List of message dictionaries with 'role' and 'content'.
+            temperature: Sampling temperature. Lower is more deterministic.
+            max_tokens: Maximum number of tokens to generate.
+
+        Yields:
+            Chunks of the generated text response.
+
+        Raises:
+            LLMClientError: If there's an error communicating with the LLM.
+        """
+        url = f"{self.base_url}/chat"
+        
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True, # Enable streaming
+            "temperature": temperature,
+        }
+            
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream("POST", url, json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if line:
+                            result = json.loads(line)
+                            chunk = result.get("message", {}).get("content", "")
+                            yield chunk
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error during streaming: {e.response.status_code} - {await e.response.aread()}")
+            raise LLMClientError(f"HTTP error: {e.response.status_code}")
+        except httpx.RequestError as e:
+            logger.error(f"Request error during streaming: {str(e)}")
+            raise LLMClientError(f"Request error: {str(e)}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding streaming response chunk: {e}")
+            raise LLMClientError(f"Error decoding stream: {e}")
+
     async def chat(
         self,
         messages: List[Dict[str, str]],
@@ -236,6 +286,66 @@ class OllamaClient:
             raise LLMClientError(f"HTTP error: {e.response.status_code}")
         except httpx.RequestError as e:
             logger.error(f"Request error: {str(e)}")
+            raise LLMClientError(f"Request error: {str(e)}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(httpx.TimeoutException),
+    )
+    async def get_embeddings_async(self, texts: List[str], embedding_model: Optional[str] = None) -> List[List[float]]:
+        """Get embeddings for a list of texts asynchronously.
+
+        Args:
+            texts: List of texts to embed.
+            embedding_model: Override the default embedding model.
+
+        Returns:
+            List of embeddings.
+
+        Raises:
+            LLMClientError: If there's an error communicating with the LLM.
+        """
+        url = f"{self.base_url}/api/embed" # Use the correct endpoint
+        model_to_use = embedding_model or config.embedding_model # Use configured embedding model
+        embeddings = []
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                for text in texts:
+                    payload = {"model": model_to_use, "prompt": text}
+                    response = await client.post(url, json=payload)
+                    response.raise_for_status()
+                    result = response.json()
+                    embeddings.append(result.get("embedding", []))
+            return embeddings
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error getting embeddings: {e.response.status_code} - {e.response.text}")
+            raise LLMClientError(f"HTTP error: {e.response.status_code}")
+        except httpx.RequestError as e:
+            logger.error(f"Request error getting embeddings: {str(e)}")
+            raise LLMClientError(f"Request error: {str(e)}")
+
+    def get_embeddings(self, texts: List[str], embedding_model: Optional[str] = None) -> List[List[float]]:
+        """Synchronous version of get_embeddings_async."""
+        url = f"{self.base_url}/api/embed" # Use the correct endpoint
+        model_to_use = embedding_model or config.embedding_model # Use configured embedding model
+        embeddings = []
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                for text in texts:
+                    payload = {"model": model_to_use, "prompt": text}
+                    response = client.post(url, json=payload)
+                    response.raise_for_status()
+                    result = response.json()
+                    embeddings.append(result.get("embedding", []))
+            return embeddings
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error getting embeddings: {e.response.status_code} - {e.response.text}")
+            raise LLMClientError(f"HTTP error: {e.response.status_code}")
+        except httpx.RequestError as e:
+            logger.error(f"Request error getting embeddings: {str(e)}")
             raise LLMClientError(f"Request error: {str(e)}")
 
 class CachedOllamaClient:

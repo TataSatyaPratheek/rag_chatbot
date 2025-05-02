@@ -269,4 +269,4 @@ For large documents:
 2. **Benchmark different processors**: Compare LlamaParse, Docling, and legacy processors for your specific documents
 3. **Cache processed documents**: Avoid re-processing unchanged documents
 4. **Monitor costs**: Regularly check processing costs and adjust settings accordingly
-5. **Use page targeting**: Process only the pages you need to reduce costs and processing time
+5. **Use page targeting**: Process only the pages you need to reduce costs and processing time.

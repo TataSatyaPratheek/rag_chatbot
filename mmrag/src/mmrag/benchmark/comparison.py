@@ -47,6 +47,8 @@ class ProcessingBenchmark:
         self,
         use_docling: bool = False,
         use_llamaparse: bool = False,
+        use_openparse: bool = False,
+        use_semantic: bool = False, # For OpenParse semantic processing
         llamaparse_api_key: Optional[str] = None,
         extract_tables: bool = True,
         extract_images: bool = True,
@@ -59,6 +61,8 @@ class ProcessingBenchmark:
         Args:
             use_docling: Whether to use Docling.
             use_llamaparse: Whether to use LlamaParse.
+            use_openparse: Whether to use OpenParse.
+            use_semantic: Whether to use semantic processing with OpenParse.
             llamaparse_api_key: API key for LlamaParse (optional).
             extract_tables: Whether to extract tables.
             extract_images: Whether to extract images.
@@ -76,10 +80,12 @@ class ProcessingBenchmark:
             processor_prefix = "llamaparse"
         elif use_docling:
             processor_prefix = "docling"
+        elif use_openparse:
+            processor_prefix = "openparse"
         else:
             processor_prefix = "legacy"
             
-        config_name = f"{processor_prefix}_t{int(extract_tables)}_i{int(extract_images)}_a{int(advanced_tables)}_e{int(enhanced_visual)}"
+        config_name = f"{processor_prefix}_t{int(extract_tables)}_i{int(extract_images)}_a{int(advanced_tables)}_e{int(enhanced_visual)}_s{int(use_semantic if use_openparse else False)}"
 
         self.results[config_name] = {
             "time_metrics": {},
@@ -94,6 +100,8 @@ class ProcessingBenchmark:
                 doc_path,
                 use_docling=use_docling,
                 use_llamaparse=use_llamaparse,
+                use_openparse=use_openparse,
+                use_semantic=use_semantic,
                 llamaparse_api_key=llamaparse_api_key,
                 extract_tables=extract_tables,
                 extract_images=extract_images,
@@ -133,6 +141,8 @@ class ProcessingBenchmark:
             retrieval_metrics = self._benchmark_retrieval(
                 use_docling=use_docling,
                 use_llamaparse=use_llamaparse,
+                use_openparse=use_openparse,
+                use_semantic=use_semantic,
                 llamaparse_api_key=llamaparse_api_key,
                 extract_tables=extract_tables,
                 extract_images=extract_images,
@@ -149,6 +159,8 @@ class ProcessingBenchmark:
         document_path: Path,
         use_docling: bool = False,
         use_llamaparse: bool = False,
+        use_openparse: bool = False,
+        use_semantic: bool = False,
         llamaparse_api_key: Optional[str] = None,
         extract_tables: bool = True,
         extract_images: bool = True,
@@ -177,12 +189,17 @@ class ProcessingBenchmark:
             if llamaparse_api_key:
                 extra_kwargs["llamaparse_api_key"] = llamaparse_api_key
 
+        # Add OpenParse specific args if needed
+        if use_openparse:
+            extra_kwargs["use_semantic_processing"] = use_semantic
+
         # Time processor initialization
         init_start = time.time()
         processor = get_processor(
             document_path,
             use_docling=use_docling,
             use_llamaparse=use_llamaparse,
+            use_openparse=use_openparse,
             extract_tables=extract_tables,
             extract_images=extract_images,
             advanced_table_detection=advanced_tables,
@@ -262,6 +279,8 @@ class ProcessingBenchmark:
         self,
         use_docling: bool = False,
         use_llamaparse: bool = False,
+        use_openparse: bool = False,
+        use_semantic: bool = False,
         llamaparse_api_key: Optional[str] = None,
         extract_tables: bool = True,
         extract_images: bool = True,
@@ -289,6 +308,10 @@ class ProcessingBenchmark:
                 extra_kwargs["use_multimodal"] = enhanced_visual
                 if llamaparse_api_key:
                     extra_kwargs["llamaparse_api_key"] = llamaparse_api_key
+            
+            # Add OpenParse specific args if needed
+            if use_openparse:
+                extra_kwargs["use_semantic_processing"] = use_semantic
 
             # Process and store documents
             try:
@@ -297,6 +320,7 @@ class ProcessingBenchmark:
                         doc_path,
                         use_docling=use_docling,
                         use_llamaparse=use_llamaparse,
+                        use_openparse=use_openparse,
                         extract_tables=extract_tables,
                         extract_images=extract_images,
                         advanced_table_detection=advanced_tables,

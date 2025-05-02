@@ -1,0 +1,106 @@
+<svg width="800" height="450" viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+
+    <style>
+      .title { font-size: 24px; font-weight: bold; text-anchor: middle; }
+      .tier-title { font-size: 18px; font-weight: bold; text-anchor: middle; fill: #333; }
+      .tier-box { rx: 10; ry: 10; stroke: #ccc; stroke-width: 1; fill: #f9fafb; }
+      .doc-snippet { font-family: 'Courier New', monospace; font-size: 11px; white-space: pre; fill: #1f2937; }
+      .output-box { border: 1px solid #d1d5db; padding: 5px; background-color: #fff; border-radius: 4px; }
+      .label { font-size: 12px; font-weight: bold; fill: #4b5563; }
+      .good { fill: #16a34a; }
+      .medium { fill: #f59e0b; }
+      .bad { fill: #ef4444; }
+    </style>
+  
+    <text x="400" y="40" class="title">mmrag - Parsing Quality Comparison</text>
+  
+    <!-- Input Document Snippet -->
+    <g transform="translate(50, 80)">
+       <text x="0" y="0" class="label">Input: Complex Document Snippet</text>
+       <foreignObject x="0" y="15" width="700" height="100">
+         <div xmlns="http://www.w3.org/1999/xhtml" class="output-box">
+           <pre class="doc-snippet">
+  Report Section 3.1: Financial Overview
+  
+  The key metrics for Q2 2024 are summarized below:
+  
+  | Region | Revenue (M) | Growth (%) |
+  |--------|-------------|------------|
+  | North  |     10.5    |    5.2     |
+  | South  |      8.2    |    3.1     |
+  
+  Further analysis is required for the South region's performance.
+           </pre>
+         </div>
+       </foreignObject>
+    </g>
+  
+    <!-- Free Tier -->
+    <g transform="translate(50, 220)">
+      <rect width="220" height="180" class="tier-box" fill="#e0f2fe"/>
+      <text x="110" y="25" class="tier-title">Free Tier</text>
+      <text x="110" y="45" font-size="11px" text-anchor="middle" fill="#6b7280">(Legacy Parser)</text>
+      <foreignObject x="10" y="60" width="200" height="110">
+         <div xmlns="http://www.w3.org/1999/xhtml" class="output-box">
+           <pre class="doc-snippet">
+  Report Section 3.1: Financial Overview
+  The key metrics for Q2 2024 are summarized below:
+  Region Revenue (M) Growth (%)
+  North 10.5 5.2
+  South 8.2 3.1
+  Further analysis is required for the South region's performance.
+           </pre>
+         </div>
+       </foreignObject>
+       <text x="110" y="170" class="bad" font-size="12px" text-anchor="middle">\u2717 Table structure lost</text>
+    </g>
+  
+    <!-- Standard Tier -->
+    <g transform="translate(290, 220)">
+      <rect width="220" height="180" class="tier-box" fill="#dcfce7"/>
+      <text x="110" y="25" class="tier-title">Standard Tier</text>
+      <text x="110" y="45" font-size="11px" text-anchor="middle" fill="#6b7280">(Docling/OpenParse)</text>
+       <foreignObject x="10" y="60" width="200" height="110">
+         <div xmlns="http://www.w3.org/1999/xhtml" class="output-box">
+           <pre class="doc-snippet">
+  Report Section 3.1: Financial Overview
+  The key metrics for Q2 2024 are summarized below:
+  
+  Table:
+  Region,Revenue (M),Growth (%)
+  North,10.5,5.2
+  South,8.2,3.1
+  
+  Further analysis is required for the South region's performance.
+           </pre>
+         </div>
+       </foreignObject>
+       <text x="110" y="170" class="medium" font-size="12px" text-anchor="middle">\u25B3 Basic table extraction</text>
+    </g>
+  
+    <!-- Pro Tier -->
+    <g transform="translate(530, 220)">
+      <rect width="220" height="180" class="tier-box" fill="#ffedd5"/>
+      <text x="110" y="25" class="tier-title">Pro Tier</text>
+      <text x="110" y="45" font-size="11px" text-anchor="middle" fill="#6b7280">(LlamaParse, etc.)</text>
+      <foreignObject x="10" y="60" width="200" height="110">
+         <div xmlns="http://www.w3.org/1999/xhtml" class="output-box">
+           <pre class="doc-snippet">
+  Report Section 3.1: Financial Overview
+  The key metrics for Q2 2024 are summarized below:
+  
+  Table:
+  | Region | Revenue (M) | Growth (%) |
+  |--------|-------------|------------|
+  | North  |     10.5    |    5.2     |
+  | South  |      8.2    |    3.1     |
+  
+  Further analysis is required for the South region's performance.
+           </pre>
+         </div>
+       </foreignObject>
+        <text x="110" y="170" class="good" font-size="12px" text-anchor="middle">\u2713 High-fidelity structure</text>
+    </g>
+  
+  </svg>
+  

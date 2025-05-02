@@ -36,7 +36,7 @@ async def test_ollama_connection(model_name: str) -> Tuple[bool, str]:
         async with httpx.AsyncClient(timeout=5.0) as client:
             # Check if Ollama is running
             try:
-                response = await client.get("http://localhost:11434/api/tags")
+                response = await client.get("http://localhost:11434/tags")
                 response.raise_for_status()
             except (httpx.ConnectError, httpx.TimeoutException):
                 return False, "Ollama server is not running"
@@ -53,7 +53,7 @@ async def test_ollama_connection(model_name: str) -> Tuple[bool, str]:
                     "prompt": "Hello, are you working?",
                     "stream": False
                 }
-                response = await client.post("http://localhost:11434/api/generate", json=data, timeout=10.0)
+                response = await client.post("http://localhost:11434/generate", json=data, timeout=10.0)
                 response.raise_for_status()
                 return True, "Ollama connection successful"
             except (httpx.HTTPError, httpx.TimeoutException) as e:

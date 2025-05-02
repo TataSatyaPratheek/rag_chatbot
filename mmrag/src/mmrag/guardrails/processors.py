@@ -2,10 +2,10 @@
 
 import json
 import logging
-import re
 from typing import Dict, List, Optional, Union
 
 import dspy
+from mmrag.guardrails.validation import validate_json_dict_output, validate_json_list_output
 
 from mmrag.guardrails.signatures import (
     SummarySignature,
@@ -17,6 +17,40 @@ from mmrag.guardrails.signatures import (
 )
 
 logger = logging.getLogger(__name__)
+
+# --- Define Schemas for Validation ---
+
+TOPICS_SCHEMA = {"type": "array", "items": {"type": "string"}}
+
+ENTITIES_SCHEMA = {
+    "type": "object",
+    "patternProperties": {
+        "^.*$": {"type": "array", "items": {"type": "string"}}
+    },
+    "additionalProperties": False # Disallow properties not matching the pattern
+}
+
+TEXT_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string", "description": "A brief summary of the text."},
+        "sentiment": {"type": "string", "description": "Overall sentiment (e.g., positive, negative, neutral)."},
+        "purpose": {"type": "string", "description": "The likely purpose of this text segment (e.g., heading, paragraph, list item)."}
+    },
+    "required": ["summary", "sentiment", "purpose"]
+}
+
+TABLE_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "description": {"type": "string", "description": "A brief description of the table's content."},
+        "insights": {"type": "array", "items": {"type": "string"}, "description": "Key insights derived from the table data."},
+        "trends": {"type": "array", "items": {"type": "string"}, "description": "Notable trends observed in the table data."}
+    },
+    "required": ["description"] # Only description is strictly required
+}
+
+VISUAL_ANALYSIS_SCHEMA = TEXT_ANALYSIS_SCHEMA # Reuse text analysis schema for now
 
 
 class DocumentProcessingModule(dspy.Module):
@@ -55,7 +89,13 @@ class TopicsModule(dspy.Module):
 
     def forward(self, text: str):
         result = self.predictor(text=text)
-        validated_result = self._validate_json_list_output(result, "topics_json")
+        # Validate the output string before returning
+        validated_result = validate_json_list_output(
+            result.topics_json,
+            "topics_json"
+            # Note: jsonschema currently not used for lists in this implementation
+        )
+        result.topics_json = validated_result
         return validated_result
 
 
@@ -67,7 +107,13 @@ class EntitiesModule(dspy.Module):
 
     def forward(self, text: str):
         result = self.predictor(text=text)
-        validated_result = self._validate_json_dict_output(result, "entities_json")
+        # Validate the output string before returning
+        validated_result = validate_json_dict_output(
+            result.entities_json,
+            "entities_json",
+            schema=ENTITIES_SCHEMA
+        )
+        result.entities_json = validated_result
         return validated_result
 
 
@@ -79,7 +125,13 @@ class TextAnalysisModule(dspy.Module):
 
     def forward(self, text: str, context: str = ""):
         result = self.predictor(text=text, context=context)
-        validated_result = self._validate_json_dict_output(result, "analysis_json")
+        # Validate the output string before returning
+        validated_result = validate_json_dict_output(
+            result.analysis_json,
+            "analysis_json",
+            schema=TEXT_ANALYSIS_SCHEMA
+        )
+        result.analysis_json = validated_result
         return validated_result
 
 
@@ -97,8 +149,13 @@ class TableExtractionModule(dspy.Module):
             context=context,
         )
         
-        validated_result = self._validate_json_dict_output(result, "analysis_json")
-        
+        # Validate the output string before returning
+        validated_result = validate_json_dict_output(
+            result.analysis_json,
+            "analysis_json",
+            schema=TABLE_ANALYSIS_SCHEMA
+        )
+        result.analysis_json = validated_result
         return validated_result
     
 
@@ -117,84 +174,11 @@ class VisualElementModule(dspy.Module):
             surrounding_text=surrounding_text,
         )
         
-        validated_result = self._validate_json_dict_output(result, "analysis_json")
-        
+        # Validate the output string before returning
+        validated_result = validate_json_dict_output(
+            result.analysis_json,
+            "analysis_json",
+            schema=VISUAL_ANALYSIS_SCHEMA # Using text schema for now
+        )
+        result.analysis_json = validated_result
         return validated_result
-    
-
-# --- Helper methods for validation (can be part of a base class or utility) ---
-
-def _validate_json_dict_output(self, result, field_name: str):
-    """Validate and fix JSON dictionary output."""
-    validated = result
-    json_str = getattr(result, field_name, "{}")
-
-    try:
-        if json_str and json_str.strip():
-            data = json.loads(json_str)
-            if not isinstance(data, dict):
-                setattr(validated, field_name, "{}")
-                logger.warning(f"Invalid dict format in {field_name} fixed.")
-        else:
-            setattr(validated, field_name, "{}")
-    except json.JSONDecodeError:
-        fixed_json = self._attempt_json_repair(json_str)
-        setattr(validated, field_name, fixed_json or "{}")
-        if not fixed_json:
-            logger.warning(f"Invalid JSON in {field_name} fixed.")
-    return validated
-
-def _validate_json_list_output(self, result, field_name: str):
-    """Validate and fix JSON list output."""
-    validated = result
-    json_str = getattr(result, field_name, "[]")
-    try:
-        data = json.loads(json_str)
-        if not isinstance(data, list):
-            setattr(validated, field_name, "[]")
-            logger.warning(f"Invalid list format in {field_name} fixed.")
-    except json.JSONDecodeError:
-        setattr(validated, field_name, "[]") # Fallback to empty list
-        logger.warning(f"Invalid JSON in {field_name} fixed.")
-    return validated
-
-def _attempt_json_repair(self, json_str: str) -> Optional[str]:
-    """Attempt to repair invalid JSON strings."""
-    if not json_str:
-        return "{}"
-
-    # Try to find JSON within potential markdown code blocks
-    match = re.search(r'```(json)?\s*(\{.*\}|\[.*\])\s*```', json_str, re.DOTALL)
-    if match:
-        json_str = match.group(2)
-
-    # Try to fix common JSON errors
-    try:
-        # Fix missing quotes around keys
-        fixed = re.sub(r'([{,]\s*)(\w+)(\s*:)', r'\1"\2"\3', json_str)
-        # Fix single quotes to double quotes
-        fixed = fixed.replace("'", '"')
-        # Remove trailing commas (simple cases)
-        fixed = re.sub(r',\s*([\}\]])', r'\1', fixed)
-        # Validate
-        json.loads(fixed)
-        logger.info("Successfully repaired JSON string.")
-        return fixed
-    except Exception as e:
-        logger.debug(f"JSON repair attempt failed: {e}")
-        pass
-
-    # If still not valid, return None
-    return None
-
-# Add validation methods to the modules
-EntitiesModule._validate_json_dict_output = _validate_json_dict_output
-EntitiesModule._attempt_json_repair = _attempt_json_repair
-TopicsModule._validate_json_list_output = _validate_json_list_output
-TopicsModule._attempt_json_repair = _attempt_json_repair # Needed if repair logic is complex
-TextAnalysisModule._validate_json_dict_output = _validate_json_dict_output
-TextAnalysisModule._attempt_json_repair = _attempt_json_repair
-TableExtractionModule._validate_json_dict_output = _validate_json_dict_output
-TableExtractionModule._attempt_json_repair = _attempt_json_repair
-VisualElementModule._validate_json_dict_output = _validate_json_dict_output
-VisualElementModule._attempt_json_repair = _attempt_json_repair

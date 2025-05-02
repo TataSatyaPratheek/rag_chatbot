@@ -13,7 +13,7 @@ class TestOllamaClient:
         """Test client initialization."""
         # Default initialization
         client = OllamaClient()
-        assert client.base_url == "http://localhost:11434/api"
+        assert client.base_url == "http://localhost:11434"
         assert client.model == "llama2"
         assert client.timeout == 60
         
@@ -46,7 +46,7 @@ class TestOllamaClient:
         # Check that the request was made correctly
         mock_post.assert_called_once()
         url, kwargs = mock_post.call_args.args[0], mock_post.call_args.kwargs
-        assert url == "http://localhost:11434/api/generate"
+        assert url == "http://localhost:11434/generate"
         assert kwargs["json"]["model"] == "llama2"
         assert kwargs["json"]["prompt"] == "Test prompt"
         assert kwargs["json"]["system"] == "You are a test assistant"
@@ -98,7 +98,7 @@ class TestOllamaClient:
         # Check that the request was made correctly
         mock_post.assert_called_once()
         url, kwargs = mock_post.call_args.args[0], mock_post.call_args.kwargs
-        assert url == "http://localhost:11434/api/chat"
+        assert url == "http://localhost:11434/chat"
         assert kwargs["json"]["model"] == "llama2"
         assert kwargs["json"]["messages"] == messages
         assert kwargs["json"]["temperature"] == 0.7

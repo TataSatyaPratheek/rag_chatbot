@@ -1,0 +1,84 @@
+<svg width="800" height="300" viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+
+    <style>
+      .title { font-size: 24px; font-weight: bold; text-anchor: middle; }
+      .step-box { rx: 5; ry: 5; stroke: #9ca3af; stroke-width: 1; fill: #e5e7eb; }
+      .data-box { rx: 0; ry: 0; stroke: #6b7280; stroke-width: 1; fill: #f9fafb; } /* Represent data/artifacts */
+      .step-text { font-size: 14px; text-anchor: middle; fill: #1f2937; }
+      .step-detail { font-size: 11px; text-anchor: middle; fill: #4b5563; }
+      .arrow { stroke: #4b5563; stroke-width: 2; marker-end: url(#arrowhead); }
+      .label { font-size: 12px; font-style: italic; fill: #6b7280; text-anchor: middle; }
+    </style>
+  
+    <defs>
+      <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="#4b5563"/>
+      </marker>
+    </defs>
+  
+    <text x="400" y="40" class="title">mmrag - Core RAG Pipeline</text>
+  
+    <!-- User Query -->
+    <g transform="translate(30, 100)">
+      <rect width="100" height="50" class="data-box"/>
+      <text x="50" y="30" class="step-text">User Query</text>
+    </g>
+  
+    <!-- Step 1: Embed Query -->
+    <g transform="translate(170, 100)">
+      <rect width="120" height="50" class="step-box"/>
+      <text x="60" y="30" class="step-text">1. Embed Query</text>
+      <text x="60" y="45" class="step-detail">(e.g., nomic-embed)</text>
+    </g>
+  
+    <!-- Step 2: Vector Search -->
+    <g transform="translate(330, 100)">
+      <rect width="140" height="50" class="step-box"/>
+      <text x="70" y="30" class="step-text">2. Vector Search</text>
+       <text x="70" y="45" class="step-detail">(ChromaDB)</text>
+    </g>
+  
+    <!-- Step 3: Retrieve Context -->
+     <g transform="translate(510, 100)">
+      <rect width="120" height="50" class="data-box"/>
+      <text x="60" y="30" class="step-text">Relevant</text>
+      <text x="60" y="45" class="step-detail">Context Chunks</text>
+    </g>
+  
+    <!-- Step 4: Augment Prompt -->
+    <g transform="translate(330, 200)">
+      <rect width="140" height="50" class="step-box"/>
+      <text x="70" y="30" class="step-text">3. Augment Prompt</text>
+      <text x="70" y="45" class="step-detail">(Query + Context)</text>
+    </g>
+  
+    <!-- Step 5: LLM Generation -->
+    <g transform="translate(510, 200)">
+      <rect width="120" height="50" class="step-box"/>
+      <text x="60" y="30" class="step-text">4. LLM Generate</text>
+      <text x="60" y="45" class="step-detail">(e.g., Llama 3.2)</text>
+    </g>
+  
+    <!-- Final Answer -->
+    <g transform="translate(670, 200)">
+       <rect width="100" height="50" class="data-box" fill="#dcfce7"/>
+      <text x="50" y="30" class="step-text">Answer</text>
+    </g>
+  
+    <!-- Arrows -->
+    <line x1="130" y1="125" x2="170" y2="125" class="arrow"/> <!-- Query to Embed -->
+    <line x1="290" y1="125" x2="330" y2="125" class="arrow"/> <!-- Embed to Search -->
+    <line x1="470" y1="125" x2="510" y2="125" class="arrow"/> <!-- Search to Context -->
+  
+    <!-- Arrows connecting Context and Query to Augment Prompt -->
+     <path d="M 570 150 V 180 Q 570 200 470 225 H 470" stroke="#4b5563" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+     <text x="520" y="185" class="label">Context</text>
+  
+     <path d="M 80 150 V 225 H 330" stroke="#4b5563" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+     <text x="200" y="245" class="label">Original Query</text>
+  
+    <line x1="470" y1="225" x2="510" y2="225" class="arrow"/> <!-- Augment to LLM -->
+    <line x1="630" y1="225" x2="670" y2="225" class="arrow"/> <!-- LLM to Answer -->
+  
+  </svg>
+  

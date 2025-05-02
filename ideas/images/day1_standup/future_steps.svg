@@ -1,0 +1,107 @@
+<svg width="800" height="500" viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+    <style>
+      .title { font-size: 24px; font-weight: bold; text-anchor: middle; }
+      .roadmap-box { rx: 8; ry: 8; stroke: #9ca3af; stroke-width: 1.5; }
+      .step-title { font-size: 15px; font-weight: bold; text-anchor: middle; fill: #1f2937; }
+      .step-detail { font-size: 11px; fill: #4b5563; text-anchor: middle; }
+      .arrow { stroke: #6b7280; stroke-width: 2; marker-end: url(#arrowhead); }
+      .milestone { font-size: 11px; font-style: italic; fill: #6b7280; text-anchor: middle; }
+      .phase-label { font-size: 16px; font-weight: bold; fill: #4b5563; }
+    </style>
+  
+    <defs>
+      <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="#6b7280"/>
+      </marker>
+    </defs>
+  
+    <text x="400" y="40" class="title">Future Directions &amp; Next Steps</text>
+  
+    <!-- Development Path Arrow -->
+    <line x1="100" y1="170" x2="700" y2="170" stroke="#9ca3af" stroke-width="4"/>
+    <polygon points="700,170 690,165 690,175" fill="#9ca3af"/>
+  
+    <!-- Phase 1: Integration -->
+    <text x="150" y="100" class="phase-label">Phase 1: Integration</text>
+    
+    <!-- Step 1: Pro Parsers -->
+    <g transform="translate(100, 180)">
+      <rect width="150" height="80" class="roadmap-box" fill="#dcfce7"/>
+      <text x="75" y="30" class="step-title">Pro Parsers</text>
+      <text x="75" y="50" class="step-detail">Implement LlamaParse</text>
+      <text x="75" y="65" class="step-detail">Advanced API Integration</text>
+    </g>
+  
+    <!-- Step 2: Processor Factory -->
+    <g transform="translate(270, 180)">
+      <rect width="150" height="80" class="roadmap-box" fill="#e0f2fe"/>
+      <text x="75" y="30" class="step-title">Processor Factory</text>
+      <text x="75" y="50" class="step-detail">Dynamic Parser Selection</text>
+      <text x="75" y="65" class="step-detail">User Tier Configuration</text>
+    </g>
+  
+    <!-- Phase 2: Expansion -->
+    <text x="470" y="100" class="phase-label">Phase 2: Expansion</text>
+  
+    <!-- Step 3: UI/UX Refinement -->
+    <g transform="translate(440, 180)">
+      <rect width="150" height="80" class="roadmap-box" fill="#fef9c3"/>
+      <text x="75" y="30" class="step-title">UI/UX Refinement</text>
+      <text x="75" y="50" class="step-detail">Improve Chainlit App</text>
+      <text x="75" y="65" class="step-detail">User Feedback Integration</text>
+    </g>
+  
+    <!-- Step 4: File Support -->
+    <g transform="translate(610, 180)">
+      <rect width="150" height="80" class="roadmap-box" fill="#fbcfe8"/>
+      <text x="75" y="30" class="step-title">Expand File Types</text>
+      <text x="75" y="50" class="step-detail">Add HTML, TXT Support</text>
+      <text x="75" y="65" class="step-detail">More Document Formats</text>
+    </g>
+  
+    <!-- Phase 3: Evaluation & Deployment -->
+    <text x="310" y="300" class="phase-label">Phase 3: Evaluation &amp; Deployment</text>
+  
+    <!-- Step 5: Evaluation Framework -->
+    <g transform="translate(100, 330)">
+      <rect width="150" height="80" class="roadmap-box" fill="#ffedd5"/>
+      <text x="75" y="30" class="step-title">Evaluation</text>
+      <text x="75" y="50" class="step-detail">Develop Quality Metrics</text>
+      <text x="75" y="65" class="step-detail">Parsing &amp; RAG Benchmarks</text>
+    </g>
+  
+    <!-- Step 6: Deployment Strategy -->
+    <g transform="translate(270, 330)">
+      <rect width="150" height="80" class="roadmap-box" fill="#dbeafe"/>
+      <text x="75" y="30" class="step-title">Deployment</text>
+      <text x="75" y="50" class="step-detail">Docker Containerization</text>
+      <text x="75" y="65" class="step-detail">Cloud Service Options</text>
+    </g>
+  
+    <!-- Step 7: User Management -->
+    <g transform="translate(440, 330)">
+      <rect width="150" height="80" class="roadmap-box" fill="#e0e7ff"/>
+      <text x="75" y="30" class="step-title">User Management</text>
+      <text x="75" y="50" class="step-detail">Free/Paid User Logic</text>
+      <text x="75" y="65" class="step-detail">Access Control System</text>
+    </g>
+  
+    <!-- Step 8: Future Research -->
+    <g transform="translate(610, 330)">
+      <rect width="150" height="80" class="roadmap-box" fill="#f5f3ff"/>
+      <text x="75" y="30" class="step-title">Research</text>
+      <text x="75" y="50" class="step-detail">Advanced Parsing Methods</text>
+      <text x="75" y="65" class="step-detail">Visual Element Understanding</text>
+    </g>
+  
+    <!-- Connecting lines -->
+    <path d="M 175 260 V 280 H 175 V 330" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <path d="M 345 260 V 280 H 345 V 330" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <path d="M 515 260 V 280 H 515 V 330" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <path d="M 685 260 V 280 H 685 V 330" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 4"/>
+  
+    <!-- Footer -->
+    <text x="400" y="450" font-style="italic" font-size="14" text-anchor="middle" fill="#6b7280">
+      Roadmap for evolving mmrag into a complete document RAG solution
+    </text>
+  </svg>

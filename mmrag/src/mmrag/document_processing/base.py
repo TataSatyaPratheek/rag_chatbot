@@ -4,11 +4,9 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Callable, Awaitable
 
 from pydantic import BaseModel, Field
-
-
 class BoundingBox(BaseModel):
     """Bounding box for an element on a page."""
     
@@ -180,8 +178,13 @@ class ProcessedDocument(BaseModel):
 class DocumentProcessor(ABC):
     """Base class for document processors."""
     
+    # Make process asynchronous and add progress callback
     @abstractmethod
-    def process(self, document_path: Union[str, Path]) -> ProcessedDocument:
+    async def process( # type: ignore
+        self,
+        document_path: Union[str, Path],
+        progress_callback: Optional[Callable[[str, Optional[float]], Awaitable[None]]] = None
+     ) -> ProcessedDocument:
         """Process a document and extract elements."""
         pass
     

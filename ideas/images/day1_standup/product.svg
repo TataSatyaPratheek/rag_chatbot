@@ -1,0 +1,68 @@
+<svg width="800" height="450" viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+
+    <style>
+      .title { font-size: 24px; font-weight: bold; text-anchor: middle; }
+      .tier-title { font-size: 20px; font-weight: bold; text-anchor: middle; fill: #333; }
+      .tier-box { rx: 10; ry: 10; stroke: #ccc; stroke-width: 1; }
+      .feature-text { font-size: 14px; fill: #555; }
+      .tech-text { font-size: 12px; font-style: italic; fill: #777; }
+      .price-text { font-size: 18px; font-weight: bold; text-anchor: middle; }
+    </style>
+  
+    <text x="400" y="40" class="title">mmrag Product Tiers</text>
+  
+    <!-- Free Tier -->
+    <g transform="translate(50, 80)">
+      <rect width="220" height="320" class="tier-box" fill="#e0f2fe"/>
+      <text x="110" y="35" class="tier-title">Free</text>
+      <rect x="10" y="60" width="200" height="1" fill="#ccc"/>
+  
+      <text x="110" y="90" class="price-text" fill="#0284c7">Forever Free</text>
+  
+      <text x="20" y="130" class="feature-text">- Basic Document Parsing</text>
+      <text x="20" y="150" class="feature-text">- Ideal for Small Documents</text>
+      <text x="20" y="170" class="feature-text">- Simple Text Extraction</text>
+      <text x="20" y="190" class="feature-text">- Community Support</text>
+  
+      <text x="20" y="280" class="tech-text">Technology:</text>
+      <text x="20" y="300" class="tech-text">Legacy Parsers</text>
+    </g>
+  
+    <!-- Standard Tier -->
+    <g transform="translate(290, 80)">
+      <rect width="220" height="320" class="tier-box" fill="#dcfce7"/>
+      <text x="110" y="35" class="tier-title">Standard</text>
+       <rect x="10" y="60" width="200" height="1" fill="#ccc"/>
+  
+      <text x="110" y="90" class="price-text" fill="#16a34a">Affordable</text>
+  
+      <text x="20" y="130" class="feature-text">- Enhanced Parsing</text>
+      <text x="20" y="150" class="feature-text">- Medium-Sized Docs</text>
+      <text x="20" y="170" class="feature-text">- Handles Layouts Better</text>
+      <text x="20" y="190" class="feature-text">- Table Extraction (Basic)</text>
+      <text x="20" y="210" class="feature-text">- Email Support</text>
+  
+      <text x="20" y="280" class="tech-text">Technology:</text>
+      <text x="20" y="300" class="tech-text">Docling / OpenParse</text>
+    </g>
+  
+    <!-- Pro Tier -->
+    <g transform="translate(530, 80)">
+      <rect width="220" height="320" class="tier-box" fill="#ffedd5"/>
+      <text x="110" y="35" class="tier-title">Pro</text>
+       <rect x="10" y="60" width="200" height="1" fill="#ccc"/>
+  
+      <text x="110" y="90" class="price-text" fill="#f97316">Premium</text>
+  
+      <text x="20" y="130" class="feature-text">- Advanced AI Parsing</text>
+      <text x="20" y="150" class="feature-text">- Large and Complex Docs</text>
+      <text x="20" y="170" class="feature-text">- Superior Layout/Table/Image</text>
+      <text x="20" y="190" class="feature-text">- API Access and Costs</text>
+      <text x="20" y="210" class="feature-text">- Priority Support</text>
+  
+      <text x="20" y="280" class="tech-text">Technology:</text>
+      <text x="20" y="300" class="tech-text">LlamaParse / Advanced APIs</text>
+    </g>
+  
+  </svg>
+  

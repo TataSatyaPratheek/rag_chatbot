@@ -1,0 +1,78 @@
+<svg width="800" height="450" viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+    <style>
+      .title { font-size: 24px; font-weight: bold; text-anchor: middle; }
+      .component-box { rx: 8; ry: 8; stroke: #9ca3af; stroke-width: 1.5; fill: #f3f4f6; }
+      .component-title { font-size: 16px; font-weight: bold; text-anchor: middle; fill: #1f2937; }
+      .component-detail { font-size: 12px; fill: #4b5563; text-anchor: middle; }
+      .feature-text { font-size: 14px; fill: #1f2937; }
+      .feature-detail { font-size: 12px; fill: #4b5563; }
+      .central-core { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .arrow { stroke: #6b7280; stroke-width: 1.5; marker-end: url(#arrowhead); }
+      .flow-label { font-size: 11px; font-style: italic; fill: #6b7280; text-anchor: middle; }
+    </style>
+  
+    <defs>
+      <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="#6b7280"/>
+      </marker>
+    </defs>
+  
+    <text x="400" y="40" class="title">The Solution: Introducing mmrag</text>
+  
+    <!-- Central mmrag Component -->
+    <g transform="translate(300, 130)">
+      <circle cx="100" cy="100" r="90" class="central-core"/>
+      <text x="100" y="80" class="component-title" font-size="20">mmrag</text>
+      <text x="100" y="105" class="component-detail">Flexible Framework</text>
+      <text x="100" y="125" class="component-detail">for Document RAG</text>
+    </g>
+  
+    <!-- Feature 1: Multi-Modal Processing -->
+    <g transform="translate(50, 80)">
+      <rect width="200" height="80" class="component-box" fill="#e0f2fe"/>
+      <text x="100" y="30" class="component-title">Multi-Modal</text>
+      <text x="100" y="50" class="component-detail">Document Processing</text>
+      <text x="100" y="65" class="component-detail">Diverse File Types</text>
+    </g>
+  
+    <!-- Feature 2: Structured Data Extraction -->
+    <g transform="translate(50, 280)">
+      <rect width="200" height="80" class="component-box" fill="#dbeafe"/>
+      <text x="100" y="30" class="component-title">Structured Data</text>
+      <text x="100" y="50" class="component-detail">Text, Tables, Images</text>
+      <text x="100" y="65" class="component-detail">with Context</text>
+    </g>
+  
+    <!-- Feature 3: RAG Integration -->
+    <g transform="translate(550, 80)">
+      <rect width="200" height="80" class="component-box" fill="#fbcfe8"/>
+      <text x="100" y="30" class="component-title">Seamless RAG</text>
+      <text x="100" y="50" class="component-detail">High-Quality Input</text>
+      <text x="100" y="65" class="component-detail">to Vector Stores</text>
+    </g>
+  
+    <!-- Feature 4: User Interface -->
+    <g transform="translate(550, 280)">
+      <rect width="200" height="80" class="component-box" fill="#fef9c3"/>
+      <text x="100" y="30" class="component-title">User-Friendly</text>
+      <text x="100" y="50" class="component-detail">Chainlit Interface</text>
+      <text x="100" y="65" class="component-detail">Simple Deployment</text>
+    </g>
+  
+    <!-- Connecting arrows -->
+    <path d="M 250 120 C 290 120, 310 150, 330 180" class="arrow"/>
+    <path d="M 250 320 C 290 320, 310 290, 330 280" class="arrow"/>
+    <path d="M 550 120 C 510 120, 490 150, 470 180" class="arrow"/>
+    <path d="M 550 320 C 510 320, 490 290, 470 280" class="arrow"/>
+  
+    <!-- Example workflow circles -->
+    <circle cx="290" cy="120" r="4" fill="#60a5fa"/>
+    <circle cx="290" cy="320" r="4" fill="#60a5fa"/>
+    <circle cx="510" cy="120" r="4" fill="#60a5fa"/>
+    <circle cx="510" cy="320" r="4" fill="#60a5fa"/>
+  
+    <!-- Footer note -->
+    <text x="400" y="400" font-style="italic" font-size="14" text-anchor="middle" fill="#6b7280">
+      A complete solution for document understanding in RAG systems
+    </text>
+  </svg>

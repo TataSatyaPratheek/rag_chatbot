@@ -4,13 +4,12 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any # Added Any
 
 import chromadb
-import torch # Import torch
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
 
+from mmrag.llm.client import OllamaClient # Import OllamaClient
 from mmrag.config import config
 from mmrag.document_processing.base import DocumentElement, ProcessedDocument
 
@@ -26,11 +25,11 @@ class ChromaStore:
     def __init__(
         self,
         persist_directory: Optional[Union[str, Path]] = None,
-        embedding_model: Optional[str] = None,
+        embedding_model_name: Optional[str] = None, # Renamed for clarity
         collection_name: str = "document_elements",
     ):
         """Initialize the ChromaDB store.
-        
+
         Args:
             persist_directory: Directory to persist the database.
                 Defaults to config.chroma_persist_directory.
@@ -41,8 +40,11 @@ class ChromaStore:
         self.persist_directory = Path(persist_directory or config.chroma_persist_directory)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
         
-        self.embedding_model_name = embedding_model or config.embedding_model
+        # Use the embedding model name from config for Ollama
+        self.embedding_model_name = embedding_model_name or config.embedding_model
         
+        # Initialize Ollama client for embeddings
+        self.ollama_client = OllamaClient(base_url=config.llm_base_url)
         # Initialize ChromaDB client
         self.client = chromadb.PersistentClient(
             path=str(self.persist_directory)
@@ -59,63 +61,33 @@ class ChromaStore:
             )
             logger.info(f"Created new collection: {collection_name}")
         
-        # Load the embedding model
-        self.embedding_model = None  # Lazy load on first use
-        
         # Add embedding cache
         self.embedding_cache = EmbeddingCache()
     
-    def _get_embedding_for_text(self, text):
+    def _get_embedding_for_text(self, text: str) -> List[float]:
         """Get embedding for text with caching."""
         # Try to get from cache
         cached_embedding = self.embedding_cache.get_embedding(text, self.embedding_model_name)
         if cached_embedding is not None:
             return cached_embedding
-            
-        # Not in cache, compute embedding
-        model = self._get_embedding_model()
-        embedding = model.encode(text)
+
+        # Not in cache, compute embedding using OllamaClient
+        # Ollama client's get_embeddings expects a list and returns a list of lists
+        try:
+            embeddings_list = self.ollama_client.get_embeddings([text], embedding_model=self.embedding_model_name)
+            if not embeddings_list or not embeddings_list[0]:
+                logger.error(f"Failed to get embedding for text chunk: {text[:100]}...")
+                return [] # Return empty list on failure
+            embedding = embeddings_list[0]
+        except Exception as e:
+            logger.error(f"Error getting embedding via OllamaClient: {e}")
+            return [] # Return empty list on error
         
         # Save to cache
         self.embedding_cache.save_embedding(text, embedding, self.embedding_model_name)
         
         return embedding
 
-    def _get_embedding_model(self):
-        """Lazy-load the embedding model."""
-        if self.embedding_model is None:
-            logger.info(f"Loading embedding model: {self.embedding_model_name}")
-            # Explicitly set device to handle potential MPS/meta tensor issues
-            if torch.cuda.is_available():
-                device = "cuda"
-            elif torch.backends.mps.is_available(): # Check for MPS only if CUDA is not available
-                device = "mps"
-            else:
-                device = "cpu"
-            
-            try:
-                # Try direct initialization with device parameter
-                self.embedding_model = SentenceTransformer(self.embedding_model_name, device=device)
-            except (TypeError, ValueError):
-                # If that fails, try initializing and then moving to device
-                try:
-                    self.embedding_model = SentenceTransformer(self.embedding_model_name)
-                    
-                    # Use to_empty() if available (newer PyTorch versions)
-                    if hasattr(self.embedding_model, 'to_empty'):
-                        self.embedding_model.to_empty(device=device)
-                    else:
-                        self.embedding_model.to(device)
-                except NotImplementedError as e:
-                    if "Cannot copy out of meta tensor; no data!" in str(e):
-                        # Handle meta tensors - use CPU as fallback
-                        logger.warning("Meta tensor detected, falling back to CPU.")
-                        self.embedding_model = SentenceTransformer(self.embedding_model_name, device="cpu")
-                    else:
-                        raise
-        
-        return self.embedding_model
-    
     def add_document(self, document: ProcessedDocument) -> None:
         """Add a processed document to the vector store.
         
@@ -128,10 +100,11 @@ class ChromaStore:
             logger.warning(f"No elements found in document: {document.document_id}")
             return
         
-        # Generate embeddings for the elements
+        # Prepare data for batch embedding
         texts = []
         metadatas = []
         ids = []
+        embeddings = []
         
         for element in elements:
             # Skip elements without meaningful text
@@ -139,7 +112,7 @@ class ChromaStore:
             if not text_content or len(text_content.strip()) < 10:
                 continue
             
-            # Add to the lists
+            # Add text and metadata
             texts.append(text_content)
             metadatas.append({
                 "document_id": document.document_id,
@@ -150,23 +123,24 @@ class ChromaStore:
                 "doc_type": document.doc_type,
             })
             ids.append(f"{document.document_id}_{element.element_id}")
+
+            # Get embedding (using cache if available)
+            embedding = self._get_embedding_for_text(text_content)
+            if embedding: # Only add if embedding was successful
+                embeddings.append(embedding)
+            else:
+                # If embedding failed, remove corresponding text/metadata/id
+                texts.pop()
+                metadatas.pop()
+                ids.pop()
         
         if not texts:
             logger.warning(f"No valid elements to add for document: {document.document_id}")
             return
         
-        # Generate embeddings
-        model = self._get_embedding_model()
-        embeddings = model.encode(texts)
-        
-        # Ensure embeddings have the correct shape (n_elements, embedding_dim)
-        if len(embeddings.shape) == 1 and len(texts) == 1:
-            # If we only have one text and a 1D embedding, reshape it to 2D
-            embeddings = embeddings.reshape(1, -1)
-        
         # Add to the collection
         self.collection.add(
-            embeddings=embeddings.tolist(),
+            embeddings=embeddings, # Already a list of lists
             metadatas=metadatas,
             ids=ids,
             documents=texts,
@@ -193,16 +167,14 @@ class ChromaStore:
             Query results.
         """
         # Generate embedding for the query
-        model = self._get_embedding_model()
-        query_embedding = model.encode(query_text)
-        
-        # Ensure embedding has the correct shape
-        if len(query_embedding.shape) == 1:
-            query_embedding = query_embedding.reshape(1, -1)
+        query_embedding = self._get_embedding_for_text(query_text)
+        if not query_embedding:
+            logger.error(f"Failed to get embedding for query: {query_text[:100]}...")
+            return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]} # Return empty result structure
         
         # Query the collection
         results = self.collection.query(
-            query_embeddings=query_embedding.tolist(),
+            query_embeddings=[query_embedding], # Needs to be list of lists
             n_results=n_results,
             where=where,
             where_document=where_document,

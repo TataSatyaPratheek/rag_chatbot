@@ -22,6 +22,7 @@ cd multimodal-rag
 
 # Install with development dependencies
 pip install -e ".[dev]"
+pip install -e ".[openparse]" # Or include openparse in 'dev' or 'all'
 
 # Or install just the core package
 pip install -e .
@@ -128,6 +129,7 @@ doc = cached_processor.process("path/to/large_document.pdf")
 - `PDFProcessor`: Processes PDF documents
 - `PowerPointProcessor`: Processes PowerPoint presentations
 - `TableDetector`: Detects and extracts tables
+- `OpenParseDocumentProcessor`: Processes various document types using OpenParse.
 - `EnhancedVisualProcessor`: Analyzes images and charts
 - `ContentUnderstanding`: Uses LLMs for document analysis
 
@@ -141,6 +143,9 @@ doc = cached_processor.process("path/to/large_document.pdf")
 ```bash
 # Process a document
 mmrag process path/to/document.pdf --advanced-tables --enhanced-visual
+
+# Process using OpenParse
+mmrag process path/to/document.docx --use-openparse --advanced-tables
 
 # Store in vector database
 mmrag store path/to/document.pdf

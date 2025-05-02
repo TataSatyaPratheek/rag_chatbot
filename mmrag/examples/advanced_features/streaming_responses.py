@@ -31,7 +31,7 @@ class StreamingRAGChatbot:
     def __init__(
         self, 
         collection_name: str = "streaming_rag",
-        base_url: str = "http://localhost:11434/api",
+        base_url: str = "http://localhost:11434",
         model: str = "llama3.2:latest",
         timeout_seconds: int = 30, # Added timeout
         memory_limit_fraction: float = 0.5, # Added memory limit fraction
@@ -345,7 +345,7 @@ async def interactive_chat(chatbot: StreamingRAGChatbot) -> None:
 def run(
     load: Optional[Path] = typer.Option(None, "--load", "-l", help="Load a document at startup"),
     model: str = typer.Option("llama3.2:latest", "--model", "-m", help="LLM model to use"),
-    api_url: str = typer.Option("http://localhost:11434/api", "--api", "-a", help="Ollama API URL"),
+    api_url: str = typer.Option("http://localhost:11434", "--api", "-a", help="Ollama API URL"),
     timeout: int = typer.Option(30, "--timeout", help="Processing timeout for loading in seconds"),
     mem_limit: float = typer.Option(0.5, "--mem-limit", help="Memory limit as fraction of available memory (0.1-1.0)"),
 ):

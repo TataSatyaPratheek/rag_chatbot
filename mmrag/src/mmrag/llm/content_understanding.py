@@ -4,6 +4,7 @@
 import json
 import logging
 from typing import Dict, List, Optional, Union
+import asyncio
 
 import torch # Import torch to check devices
 import dspy
@@ -82,7 +83,7 @@ class ContentUnderstanding:
             self.table_extraction_module = None
             self.visual_element_module = None
     
-    def analyze_document(self, document: ProcessedDocument) -> Dict:
+    async def analyze_document(self, document: ProcessedDocument) -> Dict:
         """Analyze a processed document and extract key information.
         
         Args:
@@ -101,13 +102,13 @@ class ContentUnderstanding:
             doc_text = self._prepare_document_text(document)
             
             # Generate document summary
-            summary = self._generate_summary(doc_text)
+            summary = await self._generate_summary(doc_text)
             
             # Extract key topics
-            topics = self._extract_key_topics(doc_text)
+            topics = await self._extract_key_topics(doc_text)
             
             # Extract key entities
-            entities = self._extract_entities(doc_text)
+            entities = await self._extract_entities(doc_text)
             
             return {
                 "summary": summary,
@@ -122,7 +123,7 @@ class ContentUnderstanding:
                 "entities": {},
             }
     
-    def analyze_element(self, element: DocumentElement, context: str = "") -> Dict:
+    async def analyze_element(self, element: DocumentElement, context: str = "") -> Dict:
         """Analyze a specific document element.
         
         Args:
@@ -134,11 +135,11 @@ class ContentUnderstanding:
         """
         try:
             if element.element_type == "text":
-                return self._analyze_text_element(element, context)
+                return await self._analyze_text_element(element, context)
             elif element.element_type == "table":
-                return self._analyze_table_element(element, context)
+                return await self._analyze_table_element(element, context)
             elif element.element_type in ("image", "chart"):
-                return self._analyze_visual_element(element, context)
+                return await self._analyze_visual_element(element, context)
             else:
                 return {"type": element.element_type, "analysis": "No analysis available."}
         except LLMClientError as e:
@@ -180,7 +181,7 @@ class ContentUnderstanding:
         
         return all_text
     
-    def _generate_summary(self, text: str) -> str:
+    async def _generate_summary(self, text: str) -> str:
         """Generate a summary of the document.
         
         Args:
@@ -192,11 +193,11 @@ class ContentUnderstanding:
         if not self.summary_module:
             raise LLMClientError("SummaryModule not initialized.")
 
-        result = self.summary_module(text=text)
+        result = await asyncio.to_thread(self.summary_module, text=text) # DSPy calls are sync
         return result.summary
 
     
-    def _extract_key_topics(self, text: str) -> List[str]:
+    async def _extract_key_topics(self, text: str) -> List[str]:
         """Extract key topics from the document.
         
         Args:
@@ -208,7 +209,7 @@ class ContentUnderstanding:
         if not self.topics_module:
             raise LLMClientError("TopicsModule not initialized.")
 
-        result = self.topics_module(text=text)
+        result = await asyncio.to_thread(self.topics_module, text=text) # DSPy calls are sync
         json_str = result.topics_json
 
         try:
@@ -225,7 +226,7 @@ class ContentUnderstanding:
             logger.warning("Failed to parse topics as JSON, returning raw response")
             return [json_str]
     
-    def _extract_entities(self, text: str) -> Dict:
+    async def _extract_entities(self, text: str) -> Dict:
         """Extract entities from the document.
         
         Args:
@@ -237,7 +238,7 @@ class ContentUnderstanding:
         if not self.entities_module:
             raise LLMClientError("EntitiesModule not initialized.")
 
-        result = self.entities_module(text=text)
+        result = await asyncio.to_thread(self.entities_module, text=text) # DSPy calls are sync
         json_str = result.entities_json
 
         try:
@@ -254,7 +255,7 @@ class ContentUnderstanding:
             logger.warning("Failed to parse entities as JSON, returning empty dict")
             return {}
     
-    def _analyze_text_element(self, element: DocumentElement, context: str = "") -> Dict:
+    async def _analyze_text_element(self, element: DocumentElement, context: str = "") -> Dict:
         """Analyze a text element.
         
         Args:
@@ -269,7 +270,7 @@ class ContentUnderstanding:
 
         text = element.content
 
-        result = self.text_analysis_module(text=text, context=context)
+        result = await asyncio.to_thread(self.text_analysis_module, text=text, context=context) # DSPy calls are sync
         json_str = result.analysis_json
 
         try:
@@ -284,7 +285,7 @@ class ContentUnderstanding:
         except (json.JSONDecodeError, ValueError):
             return {"type": "text", "analysis": json_str}
     
-    def _analyze_table_element(self, element: DocumentElement, context: str = "") -> Dict:
+    async def _analyze_table_element(self, element: DocumentElement, context: str = "") -> Dict:
         """Analyze a table element.
         
         Args:
@@ -310,7 +311,7 @@ class ContentUnderstanding:
         else:
             table_text = str(table_content) # Fallback
 
-        result = self.table_extraction_module(table_region=table_text, context=context)
+        result = await asyncio.to_thread(self.table_extraction_module, table_region=table_text, context=context) # DSPy calls are sync
         json_str = result.analysis_json
 
         try:
@@ -326,7 +327,7 @@ class ContentUnderstanding:
             # Fallback if JSON parsing fails
             return {"type": "table", "analysis": json_str or "Analysis failed."}
     
-    def _analyze_visual_element(self, element: DocumentElement, context: str = "") -> Dict:
+    async def _analyze_visual_element(self, element: DocumentElement, context: str = "") -> Dict:
         """Analyze a visual element.
         
         Args:
@@ -345,7 +346,7 @@ class ContentUnderstanding:
         # Prepare context string - include metadata if available
         surrounding_text = f"Context: {context}. Metadata: {json.dumps(metadata)}"
 
-        result = self.visual_element_module(element_type=element_type, surrounding_text=surrounding_text)
+        result = await asyncio.to_thread(self.visual_element_module, element_type=element_type, surrounding_text=surrounding_text) # DSPy calls are sync
         json_str = result.analysis_json
 
         try:

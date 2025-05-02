@@ -3,28 +3,29 @@
 import hashlib
 import logging
 import os
+import asyncio
 import time
 import uuid
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from pathlib import Path # noqa: E402
+from typing import Dict, List, Optional, Tuple, Union, Callable, Awaitable # noqa: E402
 
-import fitz  # PyMuPDF
-import psutil
+import fitz  # PyMuPDF # noqa: E402
+import psutil # noqa: E402
 
-from pydantic import ValidationError
+from pydantic import ValidationError # noqa: E402
 
-from mmrag.document_processing.base import (
+from mmrag.document_processing.base import ( # noqa: E402
     BoundingBox,
     DocumentElement,
     DocumentProcessor,
     ProcessedDocument,
     TextElement,
 )
-from mmrag.document_processing.legacy.table import TableDetector
-from mmrag.document_processing.legacy.visual import VisualElementProcessor
-from mmrag.document_processing.legacy.advanced_table import CascadeTabNetDetector
-from mmrag.document_processing.legacy.enhanced_visual import EnhancedVisualProcessor
-from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError
+from mmrag.document_processing.legacy.table import TableDetector # noqa: E402
+from mmrag.document_processing.legacy.visual import VisualElementProcessor # noqa: E402
+from mmrag.document_processing.legacy.advanced_table import CascadeTabNetDetector # noqa: E402
+from mmrag.document_processing.legacy.enhanced_visual import EnhancedVisualProcessor # noqa: E402
+from mmrag.exceptions import ProcessingTimeoutError, MemoryLimitExceededError # noqa: E402
 
 
 logger = logging.getLogger(__name__)
@@ -82,12 +83,19 @@ class PDFProcessor(DocumentProcessor):
         document_path = Path(document_path)
         return document_path.suffix.lower() == ".pdf"
     
-    def process(self, document_path: Union[str, Path]) -> ProcessedDocument:
+    async def process(
+        self,
+        document_path: Union[str, Path],
+        progress_callback: Optional[Callable[[str, Optional[float]], Awaitable[None]]] = None
+    ) -> ProcessedDocument:
         """Process a PDF document and extract elements."""
         document_path = Path(document_path)
         
         if not self.supports(document_path):
             raise ValueError(f"Unsupported document type: {document_path.suffix}")
+
+        async def _update_progress(message: str, progress: Optional[float] = None):
+            if progress_callback: await progress_callback(message, progress)
             
         # Resource monitoring setup
         start_time = time.time()
@@ -99,7 +107,8 @@ class PDFProcessor(DocumentProcessor):
         document_id = self._generate_document_id(document_path)
         
         # Open the PDF
-        doc = fitz.open(document_path)
+        await _update_progress(f"Opening PDF: {document_path.name}...")
+        doc = await asyncio.to_thread(fitz.open, document_path)
         
         # Extract metadata
         metadata = self._extract_metadata(doc)
@@ -108,30 +117,37 @@ class PDFProcessor(DocumentProcessor):
         elements = []
         
         # Process each page
+        total_pages = len(doc)
         for page_idx, page in enumerate(doc):
+            page_num = page_idx + 1
+            progress_fraction = page_num / total_pages
+            await _update_progress(f"Processing page {page_num}/{total_pages}...", progress_fraction)
             # --- Resource Checks ---
             elapsed_time = time.time() - start_time
             if elapsed_time > self.timeout_seconds:
-                raise ProcessingTimeoutError(f"Processing exceeded {self.timeout_seconds} seconds limit.")
+                raise ProcessingTimeoutError(f"Processing exceeded {self.timeout_seconds}s limit.", timeout_seconds=self.timeout_seconds)
                 
             current_rss = process.memory_info().rss
-            if current_rss > (initial_available_memory - (psutil.virtual_memory().available - memory_limit_bytes)): # Check against the calculated limit based on available memory
-                raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB).")
+            if current_rss > memory_limit_bytes:
+                raise MemoryLimitExceededError(f"Memory usage exceeded limit.", usage_mb=current_rss / (1024**2), limit_mb=memory_limit_bytes / (1024**2))
             # --- End Resource Checks ---
 
             # Extract text blocks
-            text_elements = self._extract_text_blocks(page, page_idx)
+            text_elements = await asyncio.to_thread(self._extract_text_blocks, page, page_idx)
             elements.extend(text_elements)
             
             # Extract tables if enabled
             if self.extract_tables:
-                table_elements = self.table_detector.detect_tables(page, page_idx)
+                await _update_progress(f"Detecting tables on page {page_num}/{total_pages}...", progress_fraction)
+                table_elements = await asyncio.to_thread(self.table_detector.detect_tables, page, page_idx)
                 elements.extend(table_elements)
             
             # Extract visual elements if enabled
             if self.extract_images:
+                await _update_progress(f"Extracting visuals on page {page_num}/{total_pages}...", progress_fraction)
                 if self.enable_enhanced_visual and isinstance(self.visual_processor, EnhancedVisualProcessor):
-                    visual_elements = self.visual_processor.extract_visual_elements(page, page_idx)
+                    # Assuming _extract_images and _detect_chart within it might block
+                    visual_elements = await asyncio.to_thread(self.visual_processor.extract_visual_elements, page, page_idx)
                 else:
                     visual_elements = self.visual_processor.extract_images(page, page_idx)
                 elements.extend(visual_elements)
@@ -147,10 +163,11 @@ class PDFProcessor(DocumentProcessor):
         
         # Add LLM analysis if requested
         if self.enable_llm_analysis:
+            await _update_progress("Performing LLM analysis...", None)
             try:
                 from mmrag.llm.content_understanding import ContentUnderstanding
                 analyzer = ContentUnderstanding()
-                analysis = analyzer.analyze_document(processed_document)
+                analysis = await analyzer.analyze_document(processed_document) # Make call async
                 processed_document.analysis = analysis
             except ImportError:
                 logger.warning("LLM analysis requested but mmrag.llm is not available")

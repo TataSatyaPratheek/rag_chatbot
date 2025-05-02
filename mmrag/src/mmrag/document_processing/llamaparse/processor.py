@@ -2,10 +2,11 @@
 
 import uuid
 import hashlib
+import asyncio
 import logging
 import os
-from pathlib import Path
-from typing import Dict, List, Optional, Union
+from pathlib import Path # noqa: E402
+from typing import Dict, List, Optional, Union, Callable, Awaitable
 
 try:
     from llama_parse import LlamaParse
@@ -16,14 +17,14 @@ except ImportError:
     class LlamaParse:
         pass
 
-import psutil
+import psutil # noqa: E402
 
-from mmrag.document_processing.base import (
+from mmrag.document_processing.base import ( # noqa: E402
     DocumentProcessor, ProcessedDocument, BoundingBox,
     TextElement, TableElement, ImageElement, ChartElement
 )
-from mmrag.exceptions import ProcessingError, ProcessingTimeoutError, MemoryLimitExceededError
-from mmrag.document_processing.llamaparse.converter import extract_elements_from_llamaparse
+from mmrag.exceptions import ProcessingError, ProcessingTimeoutError, MemoryLimitExceededError # noqa: E402
+from mmrag.document_processing.llamaparse.converter import extract_elements_from_llamaparse # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +117,15 @@ class LlamaParseDocumentProcessor(DocumentProcessor):
             ".pdf", ".pptx", ".ppt", ".docx", ".doc", ".xlsx", ".html"
         ]
 
-    def process(self, document_path: Union[str, Path]) -> ProcessedDocument:
+    async def process(
+        self,
+        document_path: Union[str, Path],
+        progress_callback: Optional[Callable[[str, Optional[float]], Awaitable[None]]] = None
+    ) -> ProcessedDocument:
         """Process a document and extract elements."""
         document_path = Path(document_path)
+        async def _update_progress(message: str, progress: Optional[float] = None):
+            if progress_callback: await progress_callback(message, progress)
 
         if not self.supports(document_path):
             raise ValueError(f"Unsupported document type: {document_path.suffix}")
@@ -132,17 +139,25 @@ class LlamaParseDocumentProcessor(DocumentProcessor):
             
             if current_rss > memory_limit_bytes:
                 raise MemoryLimitExceededError(
-                    f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit "
-                    f"({memory_limit_bytes / (1024**2):.2f} MB) before calling LlamaParse."
+                    f"Memory usage exceeded limit before calling LlamaParse.",
+                    usage_mb=current_rss / (1024**2),
+                    limit_mb=memory_limit_bytes / (1024**2)
                 )
 
-            # Process the document with LlamaParse
-            with open(document_path, "rb") as f:
-                llamaparse_documents = self.parser.load_data(
-                    f, 
-                    extra_info={"file_name": document_path.name}
-                )
+            await _update_progress(f"Processing with LlamaParse API: {document_path.name}...")
+            await _update_progress(f"Sending to LlamaParse API: {document_path.name}...")
+            # Process the document with LlamaParse using async method if available
+            # Assuming aload_data takes file path or bytes. Let's use path for simplicity.
+            # If aload_data doesn't exist, wrap load_data in asyncio.to_thread
+            if hasattr(self.parser, "aload_data"):
+                 llamaparse_documents = await self.parser.aload_data(
+                     str(document_path), extra_info={"file_name": document_path.name}
+                 )
+            else: # Fallback if aload_data is not available
+                 llamaparse_documents = await asyncio.to_thread(self.parser.load_data, str(document_path), extra_info={"file_name": document_path.name})
 
+            await _update_progress("Converting LlamaParse elements...")
+            await _update_progress("Converting LlamaParse elements...", None)
             # Generate document ID
             document_id = self._generate_document_id(document_path)
             
@@ -166,10 +181,12 @@ class LlamaParseDocumentProcessor(DocumentProcessor):
 
             # Add LLM analysis if requested
             if self.enable_llm_analysis:
+                await _update_progress("Performing LLM analysis...")
+                await _update_progress("Performing LLM analysis...", None)
                 try:
                     from mmrag.llm.content_understanding import ContentUnderstanding
                     analyzer = ContentUnderstanding()
-                    analysis = analyzer.analyze_document(processed_document)
+                    analysis = await analyzer.analyze_document(processed_document) # Make call async
                     processed_document.analysis = analysis
                 except ImportError:
                     logger.warning("LLM analysis requested but mmrag.llm is not available")
@@ -179,9 +196,9 @@ class LlamaParseDocumentProcessor(DocumentProcessor):
             return processed_document
 
         except Exception as e:
-            if "timeout" in str(e).lower():
-                raise ProcessingTimeoutError(f"Processing timed out: {e}") from e
-            elif isinstance(e, MemoryError):
+            if "timeout" in str(e).lower() or isinstance(e, asyncio.TimeoutError):
+                raise ProcessingTimeoutError(f"LlamaParse processing timed out: {e}", timeout_seconds=self.timeout_seconds) from e
+            elif isinstance(e, MemoryError) or "memory" in str(e).lower():
                 raise MemoryLimitExceededError(f"Memory limit exceeded: {e}") from e
             else:
                 raise ProcessingError(f"Error processing document with LlamaParse: {e}") from e

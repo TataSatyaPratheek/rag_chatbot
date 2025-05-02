@@ -60,6 +60,7 @@ mmrag/src/mmrag/document_processing/llamaparse/
 ### 1. Unit Tests
 
 Create unit tests for:
+
 - [ ] `LlamaParseDocumentProcessor`
 - [ ] Element conversion functions
 - [ ] Utility functions
@@ -67,6 +68,7 @@ Create unit tests for:
 ### 2. Integration Tests
 
 Create integration tests for:
+
 - [ ] Factory with LlamaParse
 - [ ] CLI with LlamaParse options
 - [ ] End-to-end document processing
@@ -74,6 +76,7 @@ Create integration tests for:
 ### 3. Benchmark Tests
 
 Create benchmark tests for:
+
 - [ ] Performance comparison with legacy processors
 - [ ] Performance comparison with Docling
 - [ ] Cost analysis for different document types

@@ -1,0 +1,81 @@
+<svg width="800" height="400" viewBox="0 0 800 400" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+
+    <style>
+      .title { font-size: 24px; font-weight: bold; text-anchor: middle; }
+      .step-box { rx: 8; ry: 8; stroke: #9ca3af; stroke-width: 1.5; fill: #f3f4f6; }
+      .user-box { fill: #dbeafe; stroke: #60a5fa; } /* Blue for user actions */
+      .system-box { fill: #fef9c3; stroke: #fcd34d; } /* Yellow for system actions */
+      .step-text { font-size: 14px; text-anchor: middle; fill: #1f2937; }
+      .step-detail { font-size: 11px; text-anchor: middle; fill: #4b5563; }
+      .arrow { stroke: #6b7280; stroke-width: 2; marker-end: url(#arrowhead); }
+      .flow-label { font-size: 11px; font-style: italic; fill: #6b7280; text-anchor: middle; }
+    </style>
+  
+    <defs>
+      <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="#6b7280"/>
+      </marker>
+    </defs>
+  
+    <text x="400" y="40" class="title">mmrag - User Journey Flow (Chainlit App)</text>
+  
+    <!-- Start -->
+    <g transform="translate(50, 80)">
+      <rect width="150" height="70" class="step-box user-box"/>
+      <text x="75" y="35" class="step-text">1. User Starts App</text>
+      <text x="75" y="55" class="step-detail">(Opens chainlit_app.py)</text>
+    </g>
+  
+    <!-- Option 1: Upload -->
+    <g transform="translate(250, 80)">
+      <rect width="150" height="70" class="step-box user-box"/>
+      <text x="75" y="35" class="step-text">2a. Upload Docs</text>
+      <text x="75" y="55" class="step-detail">(PDF, DOCX, PPTX)</text>
+    </g>
+  
+    <!-- System Processing -->
+     <g transform="translate(450, 80)">
+      <rect width="150" height="70" class="step-box system-box"/>
+      <text x="75" y="35" class="step-text">3. System Processes</text>
+      <text x="75" y="55" class="step-detail">(Parse, Embed, Index)</text>
+    </g>
+  
+    <!-- Option 2: Ask Question -->
+    <g transform="translate(250, 200)">
+      <rect width="150" height="70" class="step-box user-box"/>
+      <text x="75" y="35" class="step-text">2b. Ask Question</text>
+      <text x="75" y="55" class="step-detail">(Types query in chat)</text>
+    </g>
+  
+    <!-- System RAG -->
+    <g transform="translate(450, 200)">
+      <rect width="150" height="70" class="step-box system-box"/>
+      <text x="75" y="35" class="step-text">4. System Retrieves</text>
+      <text x="75" y="50" class="step-detail">&amp; Generates</text>
+       <text x="75" y="63" class="step-detail">(RAG Process)</text>
+    </g>
+  
+    <!-- Display Answer -->
+    <g transform="translate(650, 200)">
+      <rect width="150" height="70" class="step-box user-box"/> <!-- User sees the result -->
+      <text x="75" y="35" class="step-text">5. Display Answer</text>
+      <text x="75" y="55" class="step-detail">(Shows response + sources)</text>
+    </g>
+  
+    <!-- Arrows -->
+    <line x1="200" y1="115" x2="250" y2="115" class="arrow"/> <!-- Start to Upload -->
+    <line x1="400" y1="115" x2="450" y2="115" class="arrow"/> <!-- Upload to Process -->
+  
+    <!-- Arrow from Start branching to Ask -->
+    <path d="M 125 150 V 235 H 250" stroke="#6b7280" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+    <text x="180" y="180" class="flow-label">OR</text>
+  
+    <!-- Arrow from Process feeding into RAG (optional, shows data is ready) -->
+     <path d="M 525 150 V 200" stroke="#6b7280" stroke-width="2" fill="none" marker-end="url(#arrowhead)" stroke-dasharray="4 4"/>
+     <text x="545" y="175" class="flow-label">Indexed Data</text>
+  
+    <line x1="400" y1="235" x2="450" y2="235" class="arrow"/> <!-- Ask to RAG -->
+    <line x1="600" y1="235" x2="650" y2="235" class="arrow"/> <!-- RAG to Display -->
+  
+  </svg>
+  

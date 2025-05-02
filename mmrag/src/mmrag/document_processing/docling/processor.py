@@ -2,37 +2,37 @@
 
 import uuid
 import hashlib
+import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Callable, Awaitable
 import os
-from mmrag.exceptions import MemoryLimitExceededError
 
+# Corrected imports based on docling structure
 try:
-    from docling import Document, DocumentProcessor as DoclingProcessor
-    from docling.elements import TextElement as DoclingTextElement
-    from docling.elements import TableElement as DoclingTableElement
-    from docling.elements import ImageElement as DoclingImageElement
-    from docling.elements import ChartElement as DoclingChartElement
+    # Corrected imports based on docling structure
+    from docling.document_converter import DocumentConverter
+    from docling_core.types import DoclingDocument
     DOCLING_INSTALLED = True
 except ImportError:
     DOCLING_INSTALLED = False
     # Define dummy classes if docling is not installed to avoid runtime errors on import
-    class DoclingProcessor: pass
-    class Document: pass
+    class DocumentConverter: pass # Match the corrected import
+    class DoclingDocument: pass # Match the corrected import
     class DoclingTextElement: pass
     class DoclingTableElement: pass
     class DoclingImageElement: pass
     class DoclingChartElement: pass
 
 import psutil # Added for memory check
+from mmrag.exceptions import MemoryLimitExceededError # noqa: E402
 
-from mmrag.document_processing.base import (
+from mmrag.document_processing.base import ( # noqa: E402
     DocumentProcessor, ProcessedDocument, BoundingBox,
     TextElement, TableElement, ImageElement, ChartElement
 )
-from mmrag.exceptions import ProcessingError, ProcessingTimeoutError
-from mmrag.document_processing.docling.converter import convert_docling_element
+from mmrag.exceptions import ProcessingError, ProcessingTimeoutError # noqa: E402
+from mmrag.document_processing.docling.converter import convert_docling_element # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -73,12 +73,12 @@ class DoclingDocumentProcessor(DocumentProcessor):
         self.memory_limit_fraction = memory_limit_fraction # Store memory limit fraction
 
         # Initialize Docling processor with appropriate settings
-        self.docling_processor = DoclingProcessor(
+        self.docling_processor = DocumentConverter( # Use the corrected class name
             extract_tables=extract_tables,
             extract_images=extract_images,
             extract_charts=enable_enhanced_visual,
             advanced_table_detection=advanced_table_detection,
-            timeout_seconds=timeout_seconds,
+            # timeout_seconds=timeout_seconds, # DocumentConverter might not take this directly
         )
 
     def supports(self, document_path: Union[str, Path]) -> bool:
@@ -88,10 +88,16 @@ class DoclingDocumentProcessor(DocumentProcessor):
         # Assuming DoclingProcessor has a 'supports' method or similar check
         # For now, let's list common types Docling might support
         return document_path.suffix.lower() in [".pdf", ".pptx", ".ppt", ".docx", ".doc"]
-
-    def process(self, document_path: Union[str, Path]) -> ProcessedDocument:
+    
+    async def process(
+        self,
+        document_path: Union[str, Path],
+        progress_callback: Optional[Callable[[str, Optional[float]], Awaitable[None]]] = None
+    ) -> ProcessedDocument:
         """Process a document and extract elements."""
         document_path = Path(document_path)
+        async def _update_progress(message: str, progress: Optional[float] = None):
+            if progress_callback: await progress_callback(message, progress)
 
         if not self.supports(document_path):
             raise ValueError(f"Unsupported document type: {document_path.suffix}")
@@ -103,31 +109,41 @@ class DoclingDocumentProcessor(DocumentProcessor):
             memory_limit_bytes = initial_available_memory * self.memory_limit_fraction
             current_rss = process.memory_info().rss
             if current_rss > memory_limit_bytes:
-                 raise MemoryLimitExceededError(f"Memory usage ({current_rss / (1024**2):.2f} MB) exceeded limit ({memory_limit_bytes / (1024**2):.2f} MB) before calling Docling.")
+                 raise MemoryLimitExceededError(
+                     f"Memory usage exceeded limit before calling Docling.",
+                     usage_mb=current_rss / (1024**2),
+                     limit_mb=memory_limit_bytes / (1024**2)
+                 )
             # --- End Added ---
 
-            docling_doc: Document = self.docling_processor.process(document_path)
-            document_id = self._generate_document_id(document_path)
+            await _update_progress(f"Processing with Docling: {document_path.name}...")
+            # Run synchronous Docling processing in a thread (already done)
+            docling_doc: DoclingDocument = await asyncio.to_thread(
+                self.docling_processor.process, document_path
+            )
+            await _update_progress("Converting Docling elements...")
 
             elements = [
                 mmrag_element for i, docling_element in enumerate(docling_doc.elements)
                 if (mmrag_element := convert_docling_element(docling_element, i)) is not None
             ]
-
+            document_id = self._generate_document_id(document_path)
             processed_document = ProcessedDocument(
                 document_id=document_id,
-                filename=document_path.name,
+                filename=document_path.name, # Use corrected type hint
                 doc_type=document_path.suffix.lower().lstrip("."),
                 elements=elements,
                 metadata=docling_doc.metadata if hasattr(docling_doc, 'metadata') else {},
             )
 
             if self.enable_llm_analysis:
+                await _update_progress("Performing LLM analysis...")
+                await _update_progress("Performing LLM analysis...", None)
                 # LLM analysis logic remains the same as in PDFProcessor
                 try:
                     from mmrag.llm.content_understanding import ContentUnderstanding
                     analyzer = ContentUnderstanding()
-                    analysis = analyzer.analyze_document(processed_document)
+                    analysis = await analyzer.analyze_document(processed_document) # Make call async
                     processed_document.analysis = analysis
                 except ImportError:
                     logger.warning("LLM analysis requested but mmrag.llm is not available")
@@ -138,10 +154,10 @@ class DoclingDocumentProcessor(DocumentProcessor):
 
         except Exception as e:
             # Check if the exception string indicates a timeout
-            if "timeout" in str(e).lower():
-                raise ProcessingTimeoutError(f"Processing timed out: {e}") from e
-            elif isinstance(e, MemoryError): # Catch potential MemoryError from underlying libs
-                raise ProcessingTimeoutError(f"Processing timed out: {e}") from e
+            if "timeout" in str(e).lower() or isinstance(e, asyncio.TimeoutError):
+                raise ProcessingTimeoutError(f"Processing timed out: {e}", timeout_seconds=self.timeout_seconds) from e
+            elif isinstance(e, MemoryError) or "memory" in str(e).lower(): # Catch potential MemoryError from underlying libs
+                raise MemoryLimitExceededError(f"Memory limit likely exceeded: {e}") from e
             else:
                 raise ProcessingError(f"Error processing document with Docling: {e}") from e
 

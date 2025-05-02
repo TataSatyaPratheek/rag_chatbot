@@ -33,7 +33,7 @@ class RAGChatbot:
         self, 
         persist_dir: Optional[Path] = None, 
         collection_name: str = "rag_chatbot",
-        llm_base_url: str = "http://localhost:11434/api",
+        llm_base_url: str = "http://localhost:11434",
         llm_model: str = "llama3.2:latest",
         timeout_seconds: int = 30, # Added timeout
         memory_limit_fraction: float = 0.5, # Added memory limit fraction

@@ -3,13 +3,14 @@
 
 import hashlib
 import logging
+import asyncio
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Callable, Awaitable
 
 from pptx import Presentation
 
 from mmrag.document_processing.base import (
-    BoundingBox, DocumentElement, DocumentProcessor, 
+    BoundingBox, DocumentElement, DocumentProcessor,
     ProcessedDocument, TextElement, TableElement
 )
 
@@ -32,25 +33,36 @@ class PowerPointProcessor(DocumentProcessor):
         document_path = Path(document_path)
         return document_path.suffix.lower() in [".pptx", ".ppt"]
     
-    def process(self, document_path: Union[str, Path]) -> ProcessedDocument:
+    async def process(
+        self,
+        document_path: Union[str, Path],
+        progress_callback: Optional[Callable[[str, Optional[float]], Awaitable[None]]] = None
+    ) -> ProcessedDocument:
         """Process a PowerPoint document and extract elements."""
         document_path = Path(document_path)
         
+        async def _update_progress(message: str, progress: Optional[float] = None):
+            if progress_callback: await progress_callback(message, progress)
+
         if not self.supports(document_path):
             raise ValueError(f"Unsupported document type: {document_path.suffix}")
         
         # Generate a document ID based on file content
         document_id = self._generate_document_id(document_path)
         
-        # Open the presentation
-        ppt = Presentation(document_path)
+        await _update_progress(f"Opening presentation: {document_path.name}...")
+        # --- Wrap synchronous pptx calls ---
+        ppt = await asyncio.to_thread(Presentation, document_path)
         
         # Extract metadata
         metadata = self._extract_metadata(ppt)
         
         # Extract elements
         elements = []
+        total_slides = len(ppt.slides)
+        await _update_progress(f"Found {total_slides} slides.")
         
+        # --- Process slides within the async thread wrapper ---
         # Process each slide
         for slide_idx, slide in enumerate(ppt.slides):
             # Extract text elements
@@ -65,7 +77,10 @@ class PowerPointProcessor(DocumentProcessor):
             # Extract images if enabled
             if self.extract_images:
                 # Image extraction would be implemented here
+                # image_elements = await asyncio.to_thread(self._extract_image_elements, slide, slide_idx)
+                # elements.extend(image_elements)
                 pass
+            await _update_progress(f"Processed slide {slide_idx + 1}/{total_slides}", (slide_idx + 1) / total_slides)
         
         # Create the processed document
         processed_document = ProcessedDocument(
@@ -75,6 +90,8 @@ class PowerPointProcessor(DocumentProcessor):
             elements=elements,
             metadata=metadata,
         )
+        # --- End of wrapped synchronous calls ---
+        await _update_progress("Presentation processing complete.")
         
         return processed_document
     
