@@ -1,0 +1,90 @@
+<svg width="800" height="500" viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+    <style>
+      .title { font-size: 24px; font-weight: bold; text-anchor: middle; }
+      .subtitle { font-size: 16px; text-anchor: middle; fill: #4b5563; }
+      .bar { stroke-width: 1; stroke: #333; }
+      .bar-label { font-size: 12px; text-anchor: middle; fill: #1f2937; }
+      .cost-label { font-size: 12px; text-anchor: start; fill: #1f2937; }
+      .axis { stroke: #9ca3af; stroke-width: 1; }
+      .axis-label { font-size: 14px; fill: #4b5563; }
+      .legend-box { rx: 4; ry: 4; width: 14px; height: 14px; }
+      .legend-text { font-size: 12px; fill: #4b5563; dominant-baseline: middle; }
+    </style>
+  
+    <text x="400" y="40" class="title">RAG Implementation Cost Comparison</text>
+    <text x="400" y="70" class="subtitle">Monthly Cost Estimates for 100,000 Pages Processing</text>
+  
+    <!-- Cost Bar Chart -->
+    <!-- Background Grid -->
+    <line x1="100" y1="380" x2="700" y2="380" class="axis" />
+    <line x1="100" y1="340" x2="700" y2="340" class="axis" stroke-dasharray="2 2" />
+    <line x1="100" y1="300" x2="700" y2="300" class="axis" stroke-dasharray="2 2" />
+    <line x1="100" y1="260" x2="700" y2="260" class="axis" stroke-dasharray="2 2" />
+    <line x1="100" y1="220" x2="700" y2="220" class="axis" stroke-dasharray="2 2" />
+    <line x1="100" y1="180" x2="700" y2="180" class="axis" stroke-dasharray="2 2" />
+    <line x1="100" y1="140" x2="700" y2="140" class="axis" stroke-dasharray="2 2" />
+    
+    <!-- Y-axis labels -->
+    <text x="95" y="380" class="cost-label" text-anchor="end">$0</text>
+    <text x="95" y="340" class="cost-label" text-anchor="end">$1,000</text>
+    <text x="95" y="300" class="cost-label" text-anchor="end">$2,000</text>
+    <text x="95" y="260" class="cost-label" text-anchor="end">$3,000</text>
+    <text x="95" y="220" class="cost-label" text-anchor="end">$4,000</text>
+    <text x="95" y="180" class="cost-label" text-anchor="end">$5,000</text>
+    <text x="95" y="140" class="cost-label" text-anchor="end">$6,000</text>
+  
+    <!-- Google Document AI Bar -->
+    <rect x="140" y="260" width="60" height="120" class="bar" fill="#fee2e2" />
+    <rect x="140" y="160" width="60" height="100" class="bar" fill="#fecaca" opacity="0.5"/>
+    <text x="170" y="400" class="bar-label">Google</text>
+    <text x="170" y="415" class="bar-label">Document AI</text>
+    <text x="170" y="270" class="bar-label" fill="white">$3,000</text>
+    <text x="170" y="245" class="bar-label" fill="#4b5563">$1,000-$3,000</text>
+  
+    <!-- GPU Infrastructure Bar -->
+    <rect x="240" y="240" width="60" height="140" class="bar" fill="#dbeafe" />
+    <rect x="240" y="140" width="60" height="100" class="bar" fill="#bfdbfe" opacity="0.5"/>
+    <text x="270" y="400" class="bar-label">GPU</text>
+    <text x="270" y="415" class="bar-label">Infrastructure</text>
+    <text x="270" y="250" class="bar-label" fill="white">$4,000</text>
+    <text x="270" y="225" class="bar-label" fill="#4b5563">$1,500-$4,000</text>
+  
+    <!-- CPU Resources Bar -->
+    <rect x="340" y="320" width="60" height="60" class="bar" fill="#dcfce7" />
+    <rect x="340" y="260" width="60" height="60" class="bar" fill="#bbf7d0" opacity="0.5"/>
+    <text x="370" y="400" class="bar-label">CPU</text>
+    <text x="370" y="415" class="bar-label">Resources</text>
+    <text x="370" y="330" class="bar-label" fill="white">$1,200</text>
+    <text x="370" y="305" class="bar-label" fill="#4b5563">$500-$1,200</text>
+  
+    <!-- Vector Database Bar -->
+    <rect x="440" y="360" width="60" height="20" class="bar" fill="#fbcfe8" />
+    <rect x="440" y="340" width="60" height="20" class="bar" fill="#f9a8d4" opacity="0.5"/>
+    <text x="470" y="400" class="bar-label">Vector</text>
+    <text x="470" y="415" class="bar-label">Database</text>
+    <text x="470" y="375" class="bar-label" fill="#4b5563">$150-$400</text>
+  
+    <!-- Storage Bar -->
+    <rect x="540" y="360" width="60" height="20" class="bar" fill="#fef9c3" />
+    <rect x="540" y="340" width="60" height="20" class="bar" fill="#fef08a" opacity="0.5"/>
+    <text x="570" y="400" class="bar-label">Storage</text>
+    <text x="570" y="415" class="bar-label">(10TB)</text>
+    <text x="570" y="375" class="bar-label" fill="#4b5563">$200-$500</text>
+  
+    <!-- Network & Monitoring Bar -->
+    <rect x="640" y="360" width="60" height="20" class="bar" fill="#e0e7ff" />
+    <rect x="640" y="320" width="60" height="40" class="bar" fill="#c7d2fe" opacity="0.5"/>
+    <text x="670" y="400" class="bar-label">Network and</text>
+    <text x="670" y="415" class="bar-label">Monitoring</text>
+    <text x="670" y="375" class="bar-label" fill="#4b5563">$250-$650</text>
+  
+    <!-- Legend -->
+    <rect x="250" y="450" width="14" height="14" class="legend-box" fill="#333" opacity="0.7" />
+    <text x="270" y="457" class="legend-text">Lower Estimate</text>
+    
+    <rect x="400" y="450" width="14" height="14" class="legend-box" fill="#333" opacity="0.4" />
+    <text x="420" y="457" class="legend-text">Upper Estimate Range</text>
+  
+    <!-- Total Cost Range -->
+    <text x="400" y="485" class="axis-label" text-anchor="middle">Total Monthly Cost: $3,600-$9,750</text>
+  </svg>

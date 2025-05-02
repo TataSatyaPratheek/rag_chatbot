@@ -52,9 +52,9 @@ graph TD
     F --> G[Multi-Modal Document Representation]
     G --> H[Vector Database]
     
-    classDef primary fill:#d0e0ff,stroke:#3080ff,stroke-width:2px;
-    classDef secondary fill:#ffe0d0,stroke:#ff8030,stroke-width:2px;
-    classDef tertiary fill:#d0ffe0,stroke:#30ff80,stroke-width:2px;
+    classDef primary fill:#d0e0ff,stroke:#3080ff,stroke-width:2px,color:#000000;
+    classDef secondary fill:#ffe0d0,stroke:#ff8030,stroke-width:2px,color:#000000;
+    classDef tertiary fill:#d0ffe0,stroke:#30ff80,stroke-width:2px,color:#000000;
     
     class A,B,F,G,H primary;
     class C,D secondary;
@@ -369,9 +369,9 @@ graph TD
     H -->|Invalid Tables| J[Reprocess withAlternate Method]
     J --> H
     
-    classDef primary fill:#d0e0ff,stroke:#3080ff,stroke-width:2px;
-    classDef secondary fill:#ffe0d0,stroke:#ff8030,stroke-width:2px;
-    classDef process fill:#d0ffe0,stroke:#30ff80,stroke-width:2px;
+    classDef primary fill:#d0e0ff,stroke:#3080ff,stroke-width:2px,color:#000000;
+    classDef secondary fill:#ffe0d0,stroke:#ff8030,stroke-width:2px,color:#000000;
+    classDef process fill:#d0ffe0,stroke:#30ff80,stroke-width:2px,color:#000000;
     
     class A,I primary;
     class B,D,F,H,J secondary;
@@ -657,9 +657,9 @@ graph TD
     F --> H[HTML Representationwith Positions]
     F --> I[Vector Embeddingsby Component]
     
-    classDef input fill:#d0e0ff,stroke:#3080ff,stroke-width:2px;
-    classDef process fill:#ffe0d0,stroke:#ff8030,stroke-width:2px;
-    classDef output fill:#d0ffe0,stroke:#30ff80,stroke-width:2px;
+    classDef input fill:#d0e0ff,stroke:#3080ff,stroke-width:2px,color:#000000;
+    classDef process fill:#ffe0d0,stroke:#ff8030,stroke-width:2px,color:#000000;
+    classDef output fill:#d0ffe0,stroke:#30ff80,stroke-width:2px,color:#000000;
     
     class A,B,C,D input;
     class E,F process;
@@ -953,9 +953,9 @@ graph TD
     K --> H
     K --> I
     
-    classDef api fill:#d0e0ff,stroke:#3080ff,stroke-width:2px;
-    classDef storage fill:#ffe0d0,stroke:#ff8030,stroke-width:2px;
-    classDef compute fill:#d0ffe0,stroke:#30ff80,stroke-width:2px;
+    classDef api fill:#d0e0ff,stroke:#3080ff,stroke-width:2px,color:#000000;
+    classDef storage fill:#ffe0d0,stroke:#ff8030,stroke-width:2px,color:#000000;
+    classDef compute fill:#d0ffe0,stroke:#30ff80,stroke-width:2px,color:#000000;
     
     class A,J api;
     class B,H,I storage;

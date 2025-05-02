@@ -44,6 +44,9 @@ chart_*
 .cache
 example_*
 *.sh
+.chainlit
+.files
+tourism_chroma_db/
 
 # Testing
 .coverage*
