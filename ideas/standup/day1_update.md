@@ -2,7 +2,7 @@
 marp: true
 theme: gaia
 paginate: true
-header: 'mmrag: Progress & Product Vision'
+header: 'mmrag: Progress & Product Vision - 02 May 2025'
 footer: 'Satya Pratheek TATA - AI Engineering Intern - Aqxle.ai'
 style: |
   img[alt~="center"] {
